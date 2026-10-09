@@ -17,4 +17,6 @@ services:
       - key: OLLAMA_BASE_URL
         sync: false
       - key: OLLAMA_MODEL
-        value: qwen2.5-coder:7b
+        value: qwen3-coder:480b-cloud
+      - key: OLLAMA_API_KEY
+        sync: false
