@@ -8,19 +8,19 @@
 - Ask general questions in Chat mode or let Agent mode inspect and edit a selected project.
 - Manage project files, upload individual files or ZIP archives, edit code, and review the agent work log.
 - Let Agent mode inspect files, make edits, run project commands, build, test, inspect failures, and iterate—similar to a repository-aware coding CLI. Commands run inside a restricted Docker sandbox, not directly on the host.
-- DeepSeek has been removed. The default Foe Engine uses Ollama and a downloadable open model; no paid model API key is required for local use.
-- Choose a different Ollama model using the `OLLAMA_MODEL` environment variable.
+- DeepSeek has been removed. The local Compose setup builds a custom `foe:latest` model profile on top of Qwen2.5-Coder 7B, with Foe-specific system instructions and a larger context window. This customizes an existing open model; it is not a foundation model trained from scratch.
+- The profile is defined in `foe-model/Modelfile`. Edit its `SYSTEM` instructions and parameters to customize Foe. To use another base model, change both the `FROM` line in that file and `OLLAMA_BASE_MODEL` in `docker-compose.yml` to the same model tag.
 - Save up to 500 personal memories (added manually in the Memory panel or automatically from your chats) in the Workspace → Memory panel; saved memories are private to your account and can be reviewed or deleted. Foe adds them as context to future chats and coding-agent runs.
 - Foe remembers your conversations: chat history is saved to your account, recent chats are listed in the sidebar, and you can reopen or delete them.
 - Web research: Agent and Assistant modes can search the public web and read pages, citing the source URLs they used.
 - Assistant mode: with no project selected, the agent still works in a private Foe Assistant workspace, so Foe can research, write, and run things without a codebase.
 - Use hosted providers only if you choose to configure their keys; provider access may have costs and limits.
 
-Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.
+Foe is your own software and custom model profile, not a newly trained frontier model. Local model quality and speed depend on the base model and your computer's memory, CPU, and GPU. To make Foe reliably know private or specialized material, provide source files/documents for it to inspect; fine-tuning requires a curated dataset and suitable compute.
 
 ## Run Foe Engine locally (recommended)
 
-Requires Docker Desktop (or Docker Engine + Compose). The first launch downloads the default model, which can take several minutes and multiple gigabytes.
+Requires Docker Desktop (or Docker Engine + Compose). The first launch downloads the base model and creates the custom Foe profile, which can take several minutes and multiple gigabytes.
 
 ```sh
 git clone https://github.com/kere0ne/Foe.git
@@ -29,6 +29,8 @@ docker compose up --build
 ```
 
 Then open http://localhost:8000. Ollama runs as a separate local container, and Foe sends prompts to it over the private Compose network. Model files and Foe project data are stored in named Docker volumes, so they survive normal container restarts.
+
+By default, Compose downloads `qwen2.5-coder:7b` and creates `foe:latest` using `foe-model/Modelfile`; the app uses `foe:latest`. After editing the Modelfile, rerun `docker compose run --rm ollama-init` to rebuild the profile. To choose another base model, change the Modelfile's `FROM` line and `OLLAMA_BASE_MODEL` in `docker-compose.yml` to the same tag. The app model remains `foe:latest`.
 
 The default model is `qwen2.5-coder:7b`. To choose another Ollama model, create a `.env` file containing, for example:
 
@@ -50,7 +52,8 @@ source .venv/bin/activate
 # Windows PowerShell: .venv\\Scripts\\Activate.ps1
 python -m pip install -r requirements.txt
 ollama pull qwen2.5-coder:7b
-AI_PROVIDER=ollama OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=qwen2.5-coder:7b uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+ollama create foe:latest -f foe-model/Modelfile
+AI_PROVIDER=ollama OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=foe:latest uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Open http://127.0.0.1:8000.
