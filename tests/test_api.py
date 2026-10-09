@@ -84,6 +84,44 @@ def test_conversations_endpoints_and_isolation():
     assert client.delete('/api/conversations/doesnotexist').status_code == 404
 
 
-def test_assistant_agent_without_provider_errors_cleanly():
+def test_assistant_agent_without_provider_uses_brain():
     response = client.post('/api/assistant/agent', json={'prompt': 'hello'})
-    assert response.status_code in (502, 503)
+    assert response.status_code == 200
+    body = response.json()
+    assert body['ok'] is True
+    assert body['provider'] == 'foe-brain'
+    assert 'Foe' in body['response'] or 'foe' in body['response'].lower()
+
+
+def test_brain_calculator_and_utilities():
+    assert client.post('/api/assistant/agent', json={'prompt': 'calculate 15% of 240'}).json()['response'].startswith('(15/100*240)') or '36' in client.post('/api/assistant/agent', json={'prompt': 'calculate 15% of 240'}).json()['response']
+    assert '8' in client.post('/api/assistant/agent', json={'prompt': 'calculate 2^3'}).json()['response']
+    assert 'km' in client.post('/api/assistant/agent', json={'prompt': 'convert 5 miles to km'}).json()['response']
+    assert 'UUID' in client.post('/api/assistant/agent', json={'prompt': 'give me a uuid'}).json()['response']
+
+
+def test_brain_notes_and_files_round_trip():
+    noted = client.post('/api/assistant/agent', json={'prompt': 'note brain test entry'})
+    assert noted.status_code == 200 and 'saved' in noted.json()['response'].lower()
+    shown = client.post('/api/assistant/agent', json={'prompt': 'show my notes'})
+    assert 'brain test entry' in shown.json()['response']
+    created = client.post('/api/assistant/agent', json={'prompt': 'create a file hello.txt with: hi from foe'})
+    assert created.status_code == 200 and 'hello.txt' in created.json()['response']
+    read = client.post('/api/assistant/agent', json={'prompt': 'read the file hello.txt'})
+    assert 'hi from foe' in read.json()['response']
+
+
+def test_capabilities_and_auth_mode_are_public():
+    from fastapi.testclient import TestClient as TC
+    from app.main import app as app2
+    anon = TC(app2)
+    caps = anon.get('/api/assistant/capabilities')
+    assert caps.status_code == 200 and len(caps.json()['capabilities']) >= 8
+    mode = anon.get('/api/auth/mode')
+    assert mode.status_code == 200 and mode.json()['mode'] in ('local', 'google')
+
+
+def test_chat_falls_back_to_brain():
+    stream = client.post('/api/chat', json={'messages': [{'role': 'user', 'content': 'what can you do'}]})
+    assert stream.status_code == 200
+    assert 'foe' in stream.text.lower()

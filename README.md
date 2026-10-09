@@ -1,59 +1,79 @@
-# Foe Agent
+# Foe — Your Own Personal AI Assistant
 
-**Foe Engine is your local-first AI assistant and software engineering agent.** It combines chat, a project-aware coding loop, project files, an editor, uploads, sandboxed command execution, GitHub tools, and optional bot runtime support.
+**Foe is your private AI assistant and software helper.** Ask it anything, calculate, write, take notes, research the web, manage files, build code, and run commands — from an app you own and control.
 
-## What makes it yours
+## Your assistant can
 
-- Run an open model on a computer you control with Ollama. The default setup does not require a paid AI API key.
-- Ask general questions in Chat mode or let Agent mode inspect and edit a selected project.
-- Manage project files, upload individual files or ZIP archives, edit code, and review the agent work log.
-- Let Agent mode inspect files, make edits, run project commands, build, test, inspect failures, and iterate—similar to a repository-aware coding CLI. Commands run inside a restricted Docker sandbox, not directly on the host.
-- DeepSeek has been removed. The default Foe Engine uses Ollama and a downloadable open model; no paid model API key is required for local use.
-- Choose a different Ollama model using the `OLLAMA_MODEL` environment variable.
-- Save up to 500 personal memories (added manually in the Memory panel or automatically from your chats) in the Workspace → Memory panel; saved memories are private to your account and can be reviewed or deleted. Foe adds them as context to future chats and coding-agent runs.
-- Foe remembers your conversations: chat history is saved to your account, recent chats are listed in the sidebar, and you can reopen or delete them.
-- Web research: Agent and Assistant modes can search the public web and read pages, citing the source URLs they used.
-- Assistant mode: with no project selected, the agent still works in a private Foe Assistant workspace, so Foe can research, write, and run things without a codebase.
-- Use hosted providers only if you choose to configure their keys; provider access may have costs and limits.
+- **Answer questions** — general knowledge, explanations, study help, how-tos, ideas and advice.
+- **Calculate** — math, percentages, unit conversions (length, weight, temperature, data, cooking) and date math.
+- **Utilities** — strong passwords, UUIDs, hashes, base64, JSON formatting, word counts, coin flips, dice and more.
+- **Write things** — emails, essays, stories, plans, plus ready-made code templates.
+- **Work with files** — list, read, create and search files in a private assistant workspace (or your own projects).
+- **Notes & todos** — say `note ...`, `todo ...`, `show my notes`, `show my todos`, `done 1`.
+- **Web research** — say `search the web for ...` and Foe reads pages and cites sources.
+- **Run things** — say `run ...` to execute commands in an isolated sandbox.
+- **Code help** — explain code, debug errors, starter projects in Python, JS, HTML and more.
+- **Remember** — save up to 500 personal memories; Foe reuses them in future chats.
+- **Chat history** — conversations are saved; reopen or delete them from the sidebar.
+- **GitHub & bots** — import repos, commit edits, and launch Discord bots (see below).
 
-Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.
+## Zero-setup start (built-in brain, no login, no keys)
 
-## Run Foe Engine locally (recommended)
+Foe ships with a built-in **Foe Brain**, so it works instantly with no Google login, no Ollama download, and no API keys. Perfect for your own private assistant on hardware you control.
 
-Requires Docker Desktop (or Docker Engine + Compose). The first launch downloads the default model, which can take several minutes and multiple gigabytes.
+Requires Python 3.11+:
 
 ```sh
 git clone https://github.com/kere0ne/Foe.git
 cd Foe
+python -m venv .venv
+# macOS/Linux
+source .venv/bin/activate
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+python -m pip install -r requirements.txt
+FOE_DEMO_MODE=true uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open http://127.0.0.1:8000 and ask: **"What can you do?"**
+
+Try: `calculate 15% of 240` · `convert 5 miles to km` · `make me a password` · `note buy milk` · `search the web for ...` · `create a file hello.py` · `run python --version`
+
+> `FOE_DEMO_MODE=true` (aliases: `FOE_NO_AUTH`, `FOE_SINGLE_USER`) skips Google sign-in and serves one private local account. Only use it on a machine you control — never expose that mode to the public internet.
+
+## Upgrade to a full AI model (optional)
+
+Foe Brain handles everyday tasks instantly. For deeper open-ended reasoning and coding, connect a full model — Foe upgrades automatically and Foe Brain stays as fallback.
+
+**Option A — Ollama on your computer (free, private).** Requires Docker Desktop (or Engine + Compose). The first launch downloads the model (minutes, multiple GB):
+
+```sh
 docker compose up --build
 ```
 
-Then open http://localhost:8000. Ollama runs as a separate local container, and Foe sends prompts to it over the private Compose network. Model files and Foe project data are stored in named Docker volumes, so they survive normal container restarts.
+Then open http://localhost:8000. Ollama runs as a separate local container on a private network; model files and project data persist in Docker volumes.
 
-The default model is `qwen2.5-coder:7b`. To choose another Ollama model, create a `.env` file containing, for example:
+The default model is `qwen2.5-coder:7b`. To choose another, create a `.env` file:
 
 ```dotenv
 OLLAMA_MODEL=qwen2.5-coder:7b
 FOE_PORT=8000
 ```
 
-Restart Compose after changing the model. Larger models can be smarter but need more RAM/VRAM; smaller models run on more machines but may make more mistakes.
+Restart Compose after changing the model. Larger models can be smarter but need more RAM/VRAM.
 
-## Existing Python/Ollama setup
-
-Requires Python 3.11+ and an Ollama server:
+**Option B — Existing Python/Ollama setup.** Requires Python 3.11+ and an Ollama server:
 
 ```sh
 python -m venv .venv
-# macOS/Linux
 source .venv/bin/activate
-# Windows PowerShell: .venv\\Scripts\\Activate.ps1
 python -m pip install -r requirements.txt
 ollama pull qwen2.5-coder:7b
 AI_PROVIDER=ollama OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=qwen2.5-coder:7b uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Open http://127.0.0.1:8000.
+
+Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.
 
 ## Hosted website versus your own model
 
@@ -63,7 +83,9 @@ Optional hosted providers are configurable in Render using `AI_PROVIDER`, `AI_FA
 
 ## Google sign-in and persistent storage
 
-Foe uses Google OAuth only. Follow [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_SETUP.md) to configure Google OAuth and persistent database/storage. For a local install, Docker volumes persist project data. On Render, set `DATABASE_URL` for durable account/session/project metadata and set `FOE_DATA_DIR` to a persistent disk mount for project files; a database alone does not preserve project files.
+For a shared or hosted deployment, Foe uses Google OAuth. Follow [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_SETUP.md) to configure Google OAuth and persistent database/storage. For a local install, Docker volumes persist project data. On Render, set `DATABASE_URL` for durable account/session/project metadata and set `FOE_DATA_DIR` to a persistent disk mount for project files; a database alone does not preserve project files.
+
+For a purely personal install on your own machine, `FOE_DEMO_MODE=true` skips Google sign-in entirely (see above).
 
 ## GitHub and Discord bots
 
