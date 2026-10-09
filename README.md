@@ -1,20 +1,21 @@
 # Foe Agent
 
-**Your own local-first AI assistant and software engineering workspace.** Foe combines an AI chat assistant with a project-aware coding agent, project files, an editor, uploads, a sandboxed terminal, GitHub tools, and optional bot runtime support.
+**Foe Engine is your local-first AI assistant and software engineering agent.** It combines chat, a project-aware coding loop, project files, an editor, uploads, sandboxed command execution, GitHub tools, and optional bot runtime support.
 
 ## What makes it yours
 
 - Run an open model on a computer you control with Ollama. The default setup does not require a paid AI API key.
 - Ask general questions in Chat mode or let Agent mode inspect and edit a selected project.
 - Manage project files, upload individual files or ZIP archives, edit code, and review the agent work log.
-- Use the isolated Docker sandbox for approved checks. Commands are not run directly on the host by default.
+- Let Agent mode inspect files, make edits, run project commands, build, test, inspect failures, and iterate—similar to a repository-aware coding CLI. Commands run inside a restricted Docker sandbox, not directly on the host.
+- DeepSeek has been removed. The default Foe Engine uses Ollama and a downloadable open model; no paid model API key is required for local use.
 - Choose a different Ollama model using the `OLLAMA_MODEL` environment variable.
 - Save up to 100 personal memories in the Workspace → Memory panel; saved memories are private to your account and can be reviewed or deleted. Foe adds them as context to future chats and coding-agent runs.
 - Use hosted providers only if you choose to configure their keys; provider access may have costs and limits.
 
 Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.
 
-## Run your own AI locally (recommended)
+## Run Foe Engine locally (recommended)
 
 Requires Docker Desktop (or Docker Engine + Compose). The first launch downloads the default model, which can take several minutes and multiple gigabytes.
 
@@ -66,6 +67,8 @@ Foe uses Google OAuth only. Follow [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_
 See [docs/GITHUB_MCP_AND_BOTS.md](docs/GITHUB_MCP_AND_BOTS.md) for GitHub tools and the separate Python/Node.js bot runtime. The bot runner can cap a launch at 20 hours, but it must run on a host that stays awake. A free Render web service cannot guarantee continuous bot uptime.
 
 ## Docker sandbox and security
+
+Foe Engine can run project-specific commands inside an isolated sandbox with networking disabled, capped resources, dropped Linux capabilities, and a read-only container root. Only the selected project folder is writable. The sandbox is not a replacement for reviewing commands and generated code.
 
 Foe is an early-stage project. The local Compose setup mounts the Docker socket so Foe can request sandbox containers; Docker socket access is powerful and should only be used on a machine you control. Keep the service private, review generated code before running it, and never enable `FOE_ALLOW_HOST_COMMANDS=true` on a public/shared deployment. See [SECURITY.md](SECURITY.md) and [docs/SANDBOX.md](docs/SANDBOX.md).
 
