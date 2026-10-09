@@ -31,7 +31,7 @@ def chat_endpoint():
 def model_payload(messages, model, stream=False, temperature=0.2, tools=None):
     payload={'model':model,'messages':messages,'stream':stream}
     if is_gemini():
-        payload['temperature']=temperature
+        # Gemini 3 models no longer accept legacy sampling parameters such as temperature.
         if tools: payload['tools']=tools
     else:
         payload['options']={'temperature':temperature}
