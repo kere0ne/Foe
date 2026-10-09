@@ -33,6 +33,14 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 Open http://127.0.0.1:8000. Ollama defaults to `http://localhost:11434`; configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL` as needed. A model is not bundled in this repository: Ollama runs the open model you choose.
 
+## Hosted AI providers
+
+Foe supports DeepSeek as its primary OpenAI-compatible provider, with optional OpenRouter and Gemini fallbacks. Configure `AI_PROVIDER=deepseek`, `DEEPSEEK_API_KEY`, and optionally `AI_FALLBACK_PROVIDERS=openrouter,gemini` plus the corresponding fallback API keys in your service environment. Providers may have billing, quota, and rate limits; no hosted provider is unlimited.
+
+## GitHub MCP and Discord bot runtime
+
+See [docs/GITHUB_MCP_AND_BOTS.md](docs/GITHUB_MCP_AND_BOTS.md) for Foe's custom GitHub MCP server, GitHub agent tools, and the separate Python/Node.js bot runtime. The bot runner can cap a launch at 20 hours, but it must run on a host that stays awake. A free Render web service cannot guarantee continuous bot uptime; a dedicated always-on worker may incur charges. The runtime executes project code, so keep it private and protect it with a strong `FOE_BOT_RUNTIME_TOKEN`.
+
 ## Docker sandbox
 
 Build the sandbox image:

@@ -1,0 +1,11 @@
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+COPY bot_runtime.py ./bot_runtime.py
+RUN useradd --create-home --uid 10001 foe && mkdir -p /var/lib/foe-bots && chown -R foe:foe /app /var/lib/foe-bots
+USER foe
+ENV FOE_BOT_WORKDIR=/var/lib/foe-bots
+CMD ["python","bot_runtime.py"]

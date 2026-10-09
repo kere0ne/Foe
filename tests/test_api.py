@@ -10,6 +10,9 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+_test_auth = client.post('/api/auth/register', json={'email':'foe-tests@example.com','password':'test-password-123'})
+assert _test_auth.status_code == 200
+client.headers.update({'Authorization': 'Bearer ' + _test_auth.json()['token']})
 
 def test_health():
     response = client.get("/api/health")
