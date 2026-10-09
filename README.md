@@ -9,6 +9,7 @@
 - Manage project files, upload individual files or ZIP archives, edit code, and review the agent work log.
 - Use the isolated Docker sandbox for approved checks. Commands are not run directly on the host by default.
 - Choose a different Ollama model using the `OLLAMA_MODEL` environment variable.
+- Save up to 100 personal memories in the Workspace → Memory panel; saved memories are private to your account and can be reviewed or deleted. Foe adds them as context to future chats and coding-agent runs.
 - Use hosted providers only if you choose to configure their keys; provider access may have costs and limits.
 
 Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.
