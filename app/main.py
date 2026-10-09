@@ -312,14 +312,14 @@ async def chat(data: ChatIn):
                                 chunk=json.loads(raw); choices=chunk.get('choices') or []
                                 delta=choices[0].get('delta',{}) if choices else {}
                                 content=delta.get('content') or ''
-                                if content: yield 'data: '+json.dumps({'message':{'content':content},'done':False})+'\\n\\n'
+                                if content: yield 'data: '+json.dumps({'message':{'content':content},'done':False})+'\n\n'
                             except json.JSONDecodeError: continue
                     else:
                         async for line in response.aiter_lines():
-                            if line: yield f'data: {line}\\n\\n'
-                    yield 'data: [DONE]\\n\\n'
+                            if line: yield f'data: {line}\n\n'
+                    yield 'data: [DONE]\n\n'
         except Exception as e:
-            yield 'data: ' + json.dumps({'error':f'AI provider unavailable at {OLLAMA_URL}: {type(e).__name__}. Start Ollama and pull a model.'}) + '\n\n'
+            yield 'data: ' + json.dumps({'error':f'AI provider unavailable at {model_url()}: {type(e).__name__}. Check provider configuration and API key.'}) + '\n\n'
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
 
 
