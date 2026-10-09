@@ -48,3 +48,13 @@ def test_task_is_recorded_as_plan():
     response = client.post(f"/api/projects/{project['id']}/tasks", json={"prompt": "Add a test"})
     assert response.status_code == 200
     assert response.json()["status"] == "planned"
+
+def test_saved_memories_round_trip():
+    created = client.post('/api/memories', json={'content': 'Prefers concise Python examples'})
+    assert created.status_code == 200
+    memory = created.json()
+    listed = client.get('/api/memories')
+    assert any(item['id'] == memory['id'] for item in listed.json())
+    deleted = client.delete('/api/memories/' + memory['id'])
+    assert deleted.status_code == 200
+    assert all(item['id'] != memory['id'] for item in client.get('/api/memories').json())
