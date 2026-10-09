@@ -1,0 +1,24 @@
+    async def stream():
+        uid=getattr(request.state,'user_id','legacy')
+        conversation=data.conversation_id
+        con=db()
+        if conversation:
+            row=con.execute('SELECT user_id FROM conversations WHERE id=?',(conversation,)).fetchone()
+            if not row or row['user_id']!=uid:
+                con.close(); conversation=None
+        if not conversation:
+            conversation=uuid.uuid4().hex[:12]
+            user_texts=[m.get('content','') for m in data.messages if m.get('role')=='user']
+            title=re.sub(r'\s+',' ',user_texts[-1] if user_texts else 'New chat').strip()[:60] or 'New chat'
+            con.execute('INSERT INTO conversations(id,user_id,title,created_at,updated_at) VALUES(?,?,?,?,?)',(conversation,uid,title,time.time(),time.time()))
+        user_msgs=[m for m in data.messages if m.get('role')=='user']
+        last_user_text=user_msgs[-1]['content'][:20000] if user_msgs else ''
+        if last_user_text:
+            dupe=con.execute('SELECT 1 FROM messages WHERE conversation_id=? AND role=? AND content=? LIMIT 1',(conversation,'user',last_user_text)).fetchone()
+            if not dupe:
+                con.execute('INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)',(uuid.uuid4().hex,conversation,'user',last_user_text,time.time()))
+        con.execute('UPDATE conversations SET updated_at=? WHERE id=?',(time.time(),conversation))
+        con.commit(); con.close()
+        full_reply=''
+        yield 'data: '+json.dumps({'conversation_id':conversation})+'\n\n'
+        failures=[]

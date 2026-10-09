@@ -1,0 +1,7 @@
+                    if full_reply:
+                        con=db()
+                        con.execute('INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)',(uuid.uuid4().hex,conversation,'assistant',full_reply[:20000],time.time()))
+                        con.execute('UPDATE conversations SET updated_at=? WHERE id=?',(time.time(),conversation))
+                        con.commit(); con.close()
+                    if AUTO_MEMORY and full_reply and last_user_text:
+                        asyncio.ensure_future(auto_remember(uid,last_user_text,full_reply))

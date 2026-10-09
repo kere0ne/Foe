@@ -1,0 +1,99 @@
+def strip_html(raw: str) -> str:
+    text = re.sub(r'(?is)<(script|style|noscript|svg|head|iframe)[^>]*>.*?</\1>', ' ', raw)
+    text = re.sub(r'(?is)<br\s*/?>|</p>|</div>|</li>|</h[1-6]>|</tr>|</blockquote>', '\n', text)
+    text = re.sub(r'(?s)<[^>]+>', ' ', text)
+    text = html_lib.unescape(text)
+    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
+    return '\n'.join(line for line in lines if line)
+
+
+async def web_search_tool(query: str, max_results: int = 6) -> dict[str, Any]:
+    query = query.strip()
+    if not query: return {'error': 'Search query is empty'}
+    if len(query) > 400: return {'error': 'Search query exceeds 400 characters'}
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={'User-Agent': USER_AGENT}) as client:
+            r = await client.get('https://html.duckduckgo.com/html/', params={'q': query})
+        if r.status_code >= 400: return {'error': f'Web search failed with HTTP {r.status_code}'}
+        results = []
+        for m in re.finditer(r'(?is)<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', r.text):
+            href, title = m.group(1), strip_html(m.group(2))
+            if 'uddg=' in href:
+                try: href = unquote(parse_qs(urlparse(href).query)['uddg'][0])
+                except Exception: pass
+            if href.startswith('//'): href = 'https:' + href
+            if not href.startswith('http'): continue
+            results.append({'title': title, 'url': href})
+            if len(results) >= max_results: break
+        if not results: return {'query': query, 'results': [], 'note': 'No results found for this query.'}
+        return {'query': query, 'results': results, 'note': 'Search snippets only; use fetch_url on a result URL to read the full page.'}
+    except Exception as e:
+        return {'error': f'Web search failed: {type(e).__name__}'}
+
+
+async def web_fetch_tool(url: str) -> dict[str, Any]:
+    url = url.strip()
+    if not re.match(r'^https?://', url): return {'error': 'Only http(s) URLs are supported'}
+    host = (urlparse(url).hostname or '').lower()
+    if not host or host == 'localhost' or host.startswith('127.') or host.startswith('10.') or host.startswith('192.168.') or host.startswith('169.254.') or host == '::1' or host.endswith('.local'):
+        return {'error': 'Internal and local addresses are not fetchable'}
+    try:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True, headers={'User-Agent': USER_AGENT}) as client:
+            r = await client.get(url)
+        if r.status_code >= 400: return {'error': f'Fetch failed with HTTP {r.status_code}'}
+        ctype = r.headers.get('content-type', '')
+        if 'text/' not in ctype and 'json' not in ctype and 'xml' not in ctype:
+            return {'url': url, 'content_type': ctype, 'note': 'Binary or non-text content; no text extracted.'}
+        content = strip_html(r.text)[:WEB_FETCH_LIMIT]
+        if not content: return {'url': url, 'content_type': ctype, 'note': 'Page returned no readable text (possibly JavaScript-rendered).'}
+        return {'url': url, 'content_type': ctype, 'content': content, 'truncated': len(content) >= WEB_FETCH_LIMIT}
+    except Exception as e:
+        return {'error': f'Fetch failed: {type(e).__name__}'}
+
+
+def ensure_assistant_project(user_id: str) -> str:
+    con = db()
+    row = con.execute('SELECT id FROM projects WHERE owner_id=? AND name=? ORDER BY created_at LIMIT 1', (user_id, ASSISTANT_PROJECT_NAME)).fetchone()
+    if row:
+        con.close(); return row['id']
+    pid = uuid.uuid4().hex[:12]
+    con.execute('INSERT INTO projects(id,name,created_at,owner_id) VALUES(?,?,?,?)', (pid, ASSISTANT_PROJECT_NAME, time.time(), user_id))
+    con.commit(); con.close()
+    (PROJECTS / pid).mkdir(parents=True, exist_ok=True)
+    return pid
+
+
+async def auto_remember(user_id: str, user_text: str, reply_text: str):
+    try:
+        prompt = ('Below is an exchange with the user. Decide whether the user stated any DURABLE fact worth saving to '
+                  'long-term memory (preferences, projects, people, goals, ongoing context). Ignore transient questions, '
+                  'small talk, code details, and secrets. Reply with a JSON array of at most 2 short third-person facts, '
+                  'or [] if nothing is worth saving.\nUSER: ' + user_text[:2000] + '\nFOE: ' + reply_text[:2000])
+        messages = [
+            {'role': 'system', 'content': 'You extract durable long-term memory facts about the user. Reply with ONLY a JSON array of strings, no other text.'},
+            {'role': 'user', 'content': prompt},
+        ]
+        if not provider_order(): return
+        provider = provider_order()[0]
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90, connect=5)) as client:
+            r = await client.post(chat_endpoint(provider), headers=model_headers(provider), json=model_payload(messages, None, False, 0.0, provider=provider))
+        if r.status_code >= 400: return
+        content = unpack_model_message(r.json(), provider).get('content', '') or ''
+        m = re.search(r'\[.*\]', content, re.S)
+        if not m: return
+        items = json.loads(m.group(0))
+        if not isinstance(items, list): return
+        con = db()
+        for item in items[:2]:
+            if not isinstance(item, str): continue
+            fact = item.strip()[:400]
+            if len(fact) < 8: continue
+            dupe = con.execute('SELECT 1 FROM memories WHERE user_id=? AND LOWER(content)=LOWER(?)', (user_id, fact)).fetchone()
+            count = con.execute('SELECT COUNT(*) n FROM memories WHERE user_id=?', (user_id,)).fetchone()['n']
+            if dupe or count >= MAX_MEMORIES: continue
+            con.execute('INSERT INTO memories(id,user_id,content,created_at) VALUES(?,?,?,?)', (uuid.uuid4().hex, user_id, fact, time.time()))
+        con.commit(); con.close()
+    except Exception:
+        pass
+
+

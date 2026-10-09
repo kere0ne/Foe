@@ -67,3 +67,23 @@ def test_deepseek_provider_removed():
 def test_agent_exposes_sandboxed_command_runner():
     names = {item['function']['name'] for item in AGENT_TOOLS}
     assert 'run_command' in names
+
+def test_agent_tools_include_web():
+    names = {item['function']['name'] for item in AGENT_TOOLS}
+    assert {'web_search', 'fetch_url'} <= names
+
+
+def test_strip_html():
+    from app.main import strip_html
+    assert strip_html('<script>bad()</script><p>Hello <b>world</b></p>') == 'Hello world'
+
+
+def test_conversations_endpoints_and_isolation():
+    assert client.get('/api/conversations').json() == []
+    assert client.get('/api/conversations/doesnotexist/messages').status_code == 404
+    assert client.delete('/api/conversations/doesnotexist').status_code == 404
+
+
+def test_assistant_agent_without_provider_errors_cleanly():
+    response = client.post('/api/assistant/agent', json={'prompt': 'hello'})
+    assert response.status_code in (502, 503)

@@ -1,0 +1,6 @@
+                            if not line: continue
+                            try:
+                                piece=(json.loads(line).get('message') or {}).get('content') or ''
+                                if piece: full_reply+=piece
+                            except (json.JSONDecodeError,AttributeError): pass
+                            yield f'data: {line}\n\n'

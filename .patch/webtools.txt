@@ -1,0 +1,5 @@
+]
+AGENT_TOOLS += [
+ {'type':'function','function':{'name':'web_search','description':'Search the public web and return result titles and URLs. Use for facts, news, prices, documentation lookups, and anything outside this workspace.','parameters':{'type':'object','properties':{'query':{'type':'string'}},'required':['query']}}},
+ {'type':'function','function':{'name':'fetch_url','description':'Fetch a public http(s) page and return its readable text. Use after web_search to read a result, or when the user gives you a URL.','parameters':{'type':'object','properties':{'url':{'type':'string'}},'required':['url']}}}
+]

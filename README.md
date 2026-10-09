@@ -10,7 +10,10 @@
 - Let Agent mode inspect files, make edits, run project commands, build, test, inspect failures, and iterate—similar to a repository-aware coding CLI. Commands run inside a restricted Docker sandbox, not directly on the host.
 - DeepSeek has been removed. The default Foe Engine uses Ollama and a downloadable open model; no paid model API key is required for local use.
 - Choose a different Ollama model using the `OLLAMA_MODEL` environment variable.
-- Save up to 100 personal memories in the Workspace → Memory panel; saved memories are private to your account and can be reviewed or deleted. Foe adds them as context to future chats and coding-agent runs.
+- Save up to 500 personal memories (added manually in the Memory panel or automatically from your chats) in the Workspace → Memory panel; saved memories are private to your account and can be reviewed or deleted. Foe adds them as context to future chats and coding-agent runs.
+- Foe remembers your conversations: chat history is saved to your account, recent chats are listed in the sidebar, and you can reopen or delete them.
+- Web research: Agent and Assistant modes can search the public web and read pages, citing the source URLs they used.
+- Assistant mode: with no project selected, the agent still works in a private Foe Assistant workspace, so Foe can research, write, and run things without a codebase.
 - Use hosted providers only if you choose to configure their keys; provider access may have costs and limits.
 
 Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.

@@ -1,0 +1,3 @@
+                                if content:
+                                    full_reply+=content
+                                    yield 'data: '+json.dumps({'message':{'content':content},'done':False})+'\n\n'
