@@ -22,7 +22,7 @@ GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
 MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
-AI_PROVIDER = os.getenv('AI_PROVIDER', 'ollama').strip().lower()
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'foe').strip().lower()
 MODEL_API_KEY = os.getenv('MODEL_API_KEY', '').strip()
 META_API_URL = os.getenv('META_API_BASE_URL', 'https://api.meta.ai/v1').rstrip('/')
 META_MODEL = os.getenv('META_MODEL', 'muse-spark-1.3').strip()
@@ -35,7 +35,10 @@ GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash').strip()
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
 OLLAMA_API_KEY = os.getenv('OLLAMA_API_KEY', '').strip()
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b').strip()
-FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDERS', 'openrouter,gemini').split(',') if p.strip()]
+FOE_MODEL_URL = os.getenv('FOE_MODEL_BASE_URL', 'http://localhost:8080/v1').strip().rstrip('/')
+FOE_MODEL_NAME = os.getenv('FOE_MODEL_NAME', 'foe').strip()
+FOE_MODEL_API_KEY = os.getenv('FOE_MODEL_API_KEY', '').strip()
+FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDERS', '').split(',') if p.strip()]
 def provider_config(provider=None):
     p = (provider or AI_PROVIDER).lower()
     configs = {
@@ -43,6 +46,7 @@ def provider_config(provider=None):
         'openrouter': {'url':OPENROUTER_URL,'key':OPENROUTER_API_KEY,'model':OPENROUTER_MODEL,'openai':True},
         'gemini': {'url':GEMINI_URL,'key':GEMINI_API_KEY,'model':GEMINI_MODEL,'openai':True},
         'ollama': {'url':OLLAMA_URL,'key':OLLAMA_API_KEY,'model':OLLAMA_MODEL,'openai':False},
+        'foe': {'url':FOE_MODEL_URL,'key':FOE_MODEL_API_KEY,'model':FOE_MODEL_NAME,'openai':True},
     }
     return configs.get(p)
 def is_gemini(provider=None): return (provider or AI_PROVIDER) == 'gemini'
@@ -58,6 +62,7 @@ def provider_order():
         if p == 'openrouter' and not OPENROUTER_API_KEY: continue
         if p == 'gemini' and not GEMINI_API_KEY: continue
         if p == 'ollama' and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY: continue
+        if p == 'foe' and FOE_MODEL_URL.startswith('https://') and not FOE_MODEL_API_KEY: continue
         order.append(p)
     return order
 def model_headers(provider=None):
@@ -86,7 +91,7 @@ def unpack_model_message(payload, provider=None):
         choices=payload.get('choices') or []
         return choices[0].get('message',{}) if choices else {}
     return payload.get('message',{})
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', META_MODEL if AI_PROVIDER == 'meta' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', FOE_MODEL_NAME if AI_PROVIDER == 'foe' else META_MODEL if AI_PROVIDER == 'meta' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
@@ -467,7 +472,7 @@ def health():
 async def models():
     configured=provider_order()
     if not configured:
-        return {'provider':AI_PROVIDER,'connected':False,'default_model':DEFAULT_MODEL,'models':[],'fallbacks':[],'error':'No AI runtime is reachable. Start Ollama locally (recommended) or configure a hosted model endpoint and credentials.'}
+        return {'provider':AI_PROVIDER,'connected':False,'default_model':DEFAULT_MODEL,'models':[],'fallbacks':[],'error':'No Foe model runtime is reachable. Start the native Foe model service or configure FOE_MODEL_BASE_URL and its optional API key.'}
     statuses=[]
     async with httpx.AsyncClient(timeout=8) as client:
         for p in configured:
