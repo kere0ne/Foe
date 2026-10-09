@@ -3,7 +3,7 @@ import asyncio, json, os, re, shutil, sqlite3, subprocess, time, uuid, zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 import httpx
-from fastapi import FastAPI, HTTPException, UploadFile, File, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -16,6 +16,7 @@ MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
 DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
+GITHUB_API = 'https://api.github.com'
 ALLOW_HOST_COMMANDS = os.getenv('FOE_ALLOW_HOST_COMMANDS', 'false').lower() == 'true'
 
 app = FastAPI(title='Foe Agent API', version='0.1.0', description='Local-first AI software engineering workspace')
@@ -50,6 +51,8 @@ class FileIn(BaseModel): path: str; content: str
 class ChatIn(BaseModel): messages: list[dict[str, str]]; model: str | None = None; temperature: float = Field(default=0.2, ge=0, le=2)
 class TaskIn(BaseModel): prompt: str = Field(min_length=1, max_length=12000)
 class CommandIn(BaseModel): command: str = Field(min_length=1, max_length=2000); timeout: int = Field(default=15, ge=1, le=60)
+class AgentIn(BaseModel): prompt: str = Field(min_length=1, max_length=12000); model: str | None = None; max_steps: int = Field(default=8, ge=1, le=12)
+class GithubFileIn(BaseModel): path: str = Field(min_length=1, max_length=500); content: str = Field(max_length=1000000); message: str = Field(default='Update from Foe Agent', min_length=1, max_length=200)
 
 @app.get('/api/health')
 def health():
@@ -147,6 +150,178 @@ async def chat(data: ChatIn):
         except Exception as e:
             yield 'data: ' + json.dumps({'error':f'AI provider unavailable at {OLLAMA_URL}: {type(e).__name__}. Start Ollama and pull a model.'}) + '\n\n'
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+
+
+def github_headers(token: str | None):
+    if not token or not token.strip():
+        raise HTTPException(401, 'Connect GitHub with a fine-grained personal access token to use repository tools.')
+    return {'Authorization': f'Bearer {token.strip()}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+
+@app.get('/api/github/status')
+async def github_status(x_github_token: str | None = Header(default=None)):
+    if not x_github_token:
+        return {'connected': False, 'message': 'GitHub is not connected in this browser.'}
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            r = await client.get(f'{GITHUB_API}/user', headers=github_headers(x_github_token))
+        if r.status_code == 401:
+            return {'connected': False, 'message': 'GitHub token is invalid or expired.'}
+        r.raise_for_status(); u = r.json()
+        return {'connected': True, 'login': u.get('login'), 'name': u.get('name')}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f'GitHub connection failed: {type(e).__name__}')
+
+@app.get('/api/github/repos')
+async def github_repos(x_github_token: str | None = Header(default=None)):
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(f'{GITHUB_API}/user/repos', headers=github_headers(x_github_token), params={'sort':'updated','per_page':100,'affiliation':'owner,collaborator,organization_member'})
+        if r.status_code >= 400:
+            raise HTTPException(r.status_code, 'GitHub API rejected the request. Check token scopes and access.')
+        return [{'full_name':x['full_name'],'name':x['name'],'private':x['private'],'default_branch':x['default_branch'],'html_url':x['html_url'],'description':x.get('description')} for x in r.json()]
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502, f'GitHub API unavailable: {type(e).__name__}')
+
+@app.get('/api/github/repo/{owner}/{repo}/tree')
+async def github_repo_tree(owner: str, repo: str, x_github_token: str | None = Header(default=None)):
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            r = await client.get(f'{GITHUB_API}/repos/{owner}/{repo}/git/trees/HEAD', headers=github_headers(x_github_token), params={'recursive':'1'})
+        if r.status_code >= 400: raise HTTPException(r.status_code, 'Could not read repository tree. Check repository access.')
+        return {'tree':[{'path':x['path'],'type':x['type'],'size':x.get('size')} for x in r.json().get('tree',[]) if x.get('type')=='blob'][:2000]}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502, f'GitHub API unavailable: {type(e).__name__}')
+
+@app.get('/api/github/repo/{owner}/{repo}/file')
+async def github_read_file(owner: str, repo: str, path: str, x_github_token: str | None = Header(default=None)):
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(f'{GITHUB_API}/repos/{owner}/{repo}/contents/{path}', headers=github_headers(x_github_token))
+        if r.status_code == 404: raise HTTPException(404, 'GitHub file not found.')
+        if r.status_code >= 400: raise HTTPException(r.status_code, 'Could not read file from GitHub.')
+        obj=r.json()
+        if obj.get('type') != 'file' or obj.get('size',0)>1000000: raise HTTPException(413, 'Only text files up to 1 MB can be opened from GitHub.')
+        import base64
+        try: content=base64.b64decode(obj.get('content','')).decode('utf-8')
+        except Exception: raise HTTPException(415, 'File is not UTF-8 text.')
+        return {'path':path,'content':content,'sha':obj.get('sha'),'size':obj.get('size')}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502, f'GitHub API unavailable: {type(e).__name__}')
+
+@app.put('/api/github/repo/{owner}/{repo}/file')
+async def github_write_file(owner: str, repo: str, data: GithubFileIn, x_github_token: str | None = Header(default=None)):
+    import base64
+    headers=github_headers(x_github_token)
+    async with httpx.AsyncClient(timeout=25) as client:
+        check=await client.get(f'{GITHUB_API}/repos/{owner}/{repo}/contents/{data.path}',headers=headers)
+        payload={'message':data.message,'content':base64.b64encode(data.content.encode()).decode()}
+        if check.status_code == 200: payload['sha']=check.json().get('sha')
+        elif check.status_code != 404: raise HTTPException(check.status_code,'Cannot check existing GitHub file; verify repository access.')
+        r=await client.put(f'{GITHUB_API}/repos/{owner}/{repo}/contents/{data.path}',headers=headers,json=payload)
+    if r.status_code >= 400: raise HTTPException(r.status_code, 'GitHub rejected the commit. Check token permissions (Contents: read/write).')
+    result=r.json()
+    return {'saved':True,'path':data.path,'commit':result.get('commit',{}).get('sha'),'url':result.get('content',{}).get('html_url')}
+
+AGENT_TOOLS = [
+ {'type':'function','function':{'name':'list_files','description':'List all project files.','parameters':{'type':'object','properties':{},'required':[]}}},
+ {'type':'function','function':{'name':'read_file','description':'Read a UTF-8 text file from the project.','parameters':{'type':'object','properties':{'path':{'type':'string'}},'required':['path']}}},
+ {'type':'function','function':{'name':'write_file','description':'Create or replace a UTF-8 project file. Only write files necessary for the user request.','parameters':{'type':'object','properties':{'path':{'type':'string'},'content':{'type':'string'}},'required':['path','content']}}},
+ {'type':'function','function':{'name':'search_files','description':'Search text in project text files.','parameters':{'type':'object','properties':{'query':{'type':'string'}},'required':['query']}}},
+ {'type':'function','function':{'name':'run_check','description':'Run a safe, pre-approved test or syntax-check command in the isolated Docker sandbox. Allowed commands: pytest -q, python -m pytest -q, python -m compileall ., node --test, npm test, npm run build, npm run lint, ruff check ., go test ./..., cargo test, git diff --check, git status --short.','parameters':{'type':'object','properties':{'command':{'type':'string'}},'required':['command']}}}
+]
+ALLOWED_AGENT_CHECKS = {'pytest -q','python -m pytest -q','python -m compileall .','node --test','npm test','npm run build','npm run lint','ruff check .','go test ./...','cargo test','git diff --check','git status --short'}
+
+async def execute_agent_tool(pid: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
+    base=project_path(pid)
+    if name == 'list_files':
+        items=[]
+        for p in base.rglob('*'):
+            if p.is_file() and not any(x in {'.git','node_modules','.venv','__pycache__'} for x in p.parts):
+                items.append({'path':p.relative_to(base).as_posix(),'size':p.stat().st_size})
+        return {'files':sorted(items,key=lambda x:x['path'])[:1500]}
+    if name == 'read_file':
+        path=str(args.get('path','')); target=safe_file(base,path)
+        if not target.is_file(): return {'error':'File not found'}
+        if target.stat().st_size > 200000: return {'error':'File exceeds 200 KB agent read limit'}
+        try: return {'path':path,'content':target.read_text(encoding='utf-8')}
+        except UnicodeDecodeError: return {'error':'Not a UTF-8 text file'}
+    if name == 'write_file':
+        path=str(args.get('path','')); content=args.get('content')
+        if not isinstance(content,str): return {'error':'content must be text'}
+        target=safe_file(base,path)
+        if len(content.encode())>1000000: return {'error':'File exceeds 1 MB write limit'}
+        target.parent.mkdir(parents=True,exist_ok=True); target.write_text(content,encoding='utf-8')
+        return {'written':path,'bytes':target.stat().st_size}
+    if name == 'search_files':
+        query=str(args.get('query','')).strip()
+        if not query: return {'error':'Search query is empty'}
+        hits=[]
+        for p in base.rglob('*'):
+            if not p.is_file() or any(x in {'.git','node_modules','.venv','__pycache__'} for x in p.parts) or p.stat().st_size>200000: continue
+            try:
+                for i,line in enumerate(p.read_text(encoding='utf-8').splitlines(),1):
+                    if query.lower() in line.lower(): hits.append({'path':p.relative_to(base).as_posix(),'line':i,'text':line[:300]})
+                    if len(hits)>=100: return {'matches':hits}
+            except (UnicodeDecodeError,OSError): continue
+        return {'matches':hits}
+    if name == 'run_check':
+        command=str(args.get('command','')).strip()
+        if command not in ALLOWED_AGENT_CHECKS: return {'error':'Command is not in the safe check allowlist','allowed':sorted(ALLOWED_AGENT_CHECKS)}
+        if not shutil.which('docker'): return {'error':'Sandbox execution unavailable on this host: Docker is not installed. Run Foe locally with Docker or configure a dedicated sandbox runner.'}
+        data=CommandIn(command=command,timeout=45)
+        # Keep checks isolated: no network, bounded resources, read-only root, only workspace mounted writable.
+        cmd=['docker','run','--rm','--network','none','--memory','768m','--cpus','1','--pids-limit','128','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=96m','--cap-drop','ALL','--security-opt','no-new-privileges','--user','10001:10001','-v',f'{base}:/workspace:rw','-w','/workspace',SANDBOX_IMAGE,'/bin/sh','-lc',command]
+        try:
+            done=subprocess.run(cmd,cwd=base,capture_output=True,text=True,timeout=data.timeout,check=False)
+            return {'command':command,'exit_code':done.returncode,'stdout':done.stdout[-12000:],'stderr':done.stderr[-12000:],'sandboxed':True}
+        except subprocess.TimeoutExpired:
+            return {'command':command,'exit_code':124,'stderr':'Timed out after 45 seconds','sandboxed':True}
+    return {'error':f'Unknown tool: {name}'}
+
+@app.post('/api/projects/{pid}/agent')
+async def run_agent(pid: str, data: AgentIn):
+    base=project_path(pid)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
+        try:
+            tags=await client.get(f'{OLLAMA_URL}/api/tags'); tags.raise_for_status()
+            available=[m.get('name') for m in tags.json().get('models',[])]
+            model=data.model or DEFAULT_MODEL
+            if available and model not in available: raise HTTPException(400,f'Model {model} is not installed on the configured provider.')
+            rows=[]
+            for p in base.rglob('*'):
+                if p.is_file() and not any(x in {'.git','node_modules','.venv','__pycache__'} for x in p.parts):
+                    rows.append(p.relative_to(base).as_posix())
+            context='\n'.join(rows[:250])
+            messages=[
+                {'role':'system','content':'You are Foe, a software engineering agent working inside one user-selected project. Use tools to inspect files before changing code, make focused edits, and run tests when possible. Do not claim a test passed unless the tool output confirms it. Never attempt secrets extraction, destructive disk operations, or network exfiltration. Tool execution is limited to this project and approved checks. If you are done, respond with a concise summary and list files changed and test results. Current project file list:\n'+context},
+                {'role':'user','content':data.prompt}
+            ]
+            steps=[]; final=''
+            for _ in range(data.max_steps):
+                r=await client.post(f'{OLLAMA_URL}/api/chat',json={'model':model,'messages':messages,'tools':AGENT_TOOLS,'stream':False,'options':{'temperature':0.1}})
+                if r.status_code>=400: raise HTTPException(502,'Model provider error: '+r.text[:400])
+                msg=r.json().get('message',{})
+                calls=msg.get('tool_calls') or []
+                messages.append({'role':'assistant','content':msg.get('content',''),'tool_calls':calls})
+                if not calls:
+                    final=msg.get('content','')
+                    break
+                for call in calls:
+                    fn=call.get('function',{}); name=fn.get('name',''); args=fn.get('arguments') or {}
+                    if not isinstance(args,dict): args={}
+                    result=await execute_agent_tool(pid,name,args)
+                    steps.append({'tool':name,'arguments':{k:v for k,v in args.items() if k!='content'},'result':result})
+                    messages.append({'role':'tool','tool_name':name,'content':json.dumps(result,ensure_ascii=False)[:16000]})
+            if not final:
+                r=await client.post(f'{OLLAMA_URL}/api/chat',json={'model':model,'messages':messages,'stream':False,'options':{'temperature':0.1}})
+                r.raise_for_status(); final=r.json().get('message',{}).get('content','Agent stopped after reaching the tool-step limit.')
+            return {'ok':True,'model':model,'response':final,'steps':steps,'step_limit':data.max_steps}
+        except HTTPException: raise
+        except httpx.ConnectError: raise HTTPException(503,f'Cannot reach Ollama at {OLLAMA_URL}. Configure OLLAMA_BASE_URL to a reachable model endpoint.')
+        except Exception as e: raise HTTPException(502,f'Agent run failed: {type(e).__name__}: {str(e)[:250]}')
 
 @app.post('/api/projects/{pid}/tasks')
 def create_task(pid: str, data: TaskIn):
