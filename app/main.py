@@ -81,6 +81,8 @@ DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', DEEPSEEK_MODEL if AI_PROVIDER == 'dee
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
+BOT_RUNNER_URL = os.getenv('FOE_BOT_RUNNER_URL', '').strip().rstrip('/')
+BOT_RUNNER_TOKEN = os.getenv('FOE_BOT_RUNNER_TOKEN', '').strip()
 ALLOW_HOST_COMMANDS = os.getenv('FOE_ALLOW_HOST_COMMANDS', 'false').lower() == 'true'
 
 app = FastAPI(title='Foe Agent API', version='0.2.0', description='AI software engineering workspace')
@@ -233,6 +235,7 @@ class TaskIn(BaseModel): prompt: str = Field(min_length=1, max_length=12000)
 class CommandIn(BaseModel): command: str = Field(min_length=1, max_length=2000); timeout: int = Field(default=15, ge=1, le=60)
 class AgentIn(BaseModel): prompt: str = Field(min_length=1, max_length=12000); model: str | None = None; max_steps: int = Field(default=8, ge=1, le=12)
 class GithubFileIn(BaseModel): path: str = Field(min_length=1, max_length=500); content: str = Field(max_length=1000000); message: str = Field(default='Update from Foe Agent', min_length=1, max_length=200)
+class BotStartIn(BaseModel): name: str = Field(default='discord-bot', min_length=1, max_length=80); entrypoint: str = Field(default='main.py', min_length=1, max_length=300); env: dict[str,str] = Field(default_factory=dict); runtime_seconds: int = Field(default=72000, ge=60, le=72000)
 
 @app.get('/api/health')
 def health():
@@ -637,6 +640,60 @@ async def run_agent(pid: str, data: AgentIn, x_github_token: str | None = Header
         except HTTPException: raise
         except httpx.ConnectError: raise HTTPException(503,'Cannot reach any configured AI provider. Check endpoints, API keys, and quota.')
         except Exception as e: raise HTTPException(502,f'Agent run failed: {type(e).__name__}: {str(e)[:250]}')
+
+@app.post('/api/projects/{pid}/bots/start')
+async def start_project_bot(pid: str, data: BotStartIn, request: Request):
+    require_project_owner(pid,getattr(request.state,'user_id','legacy'))
+    if not BOT_RUNNER_URL or not BOT_RUNNER_TOKEN:
+        raise HTTPException(503,'The separate bot runtime is not configured. Deploy bot_runtime.py as a private, always-on service, then set FOE_BOT_RUNNER_URL and FOE_BOT_RUNNER_TOKEN in Foe Environment.')
+    base=project_path(pid)
+    files={}
+    for p in base.rglob('*'):
+        if not p.is_file() or any(part in {'.git','node_modules','.venv','__pycache__','.env'} for part in p.parts): continue
+        rel=p.relative_to(base).as_posix()
+        if p.stat().st_size>500000: continue
+        try: files[rel]=p.read_text(encoding='utf-8')
+        except (UnicodeDecodeError,OSError): continue
+        if sum(len(v.encode()) for v in files.values())>5*1024*1024:
+            raise HTTPException(413,'Project source exceeds the 5 MB bot-runner upload limit.')
+    if data.entrypoint not in files:
+        raise HTTPException(400,f'Entrypoint {data.entrypoint} is not present in this project.')
+    requirements=[]
+    if 'requirements.txt' in files:
+        requirements=[line.strip() for line in files['requirements.txt'].splitlines() if line.strip() and not line.lstrip().startswith('#')]
+    payload={'name':data.name,'entrypoint':data.entrypoint,'files':files,'requirements':requirements,'env':data.env,'runtime_seconds':min(data.runtime_seconds,72000)}
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            r=await client.post(f'{BOT_RUNNER_URL}/bots/start',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN},json=payload)
+        if r.status_code>=400:
+            raise HTTPException(r.status_code,'Bot runtime rejected the start request: '+r.text[:300])
+        return r.json()
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
+
+@app.get('/api/bots')
+async def list_project_bots():
+    if not BOT_RUNNER_URL or not BOT_RUNNER_TOKEN:
+        raise HTTPException(503,'The separate bot runtime is not configured.')
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r=await client.get(f'{BOT_RUNNER_URL}/bots',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN})
+        if r.status_code>=400: raise HTTPException(r.status_code,'Bot runtime status request failed.')
+        return r.json()
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
+
+@app.post('/api/bots/{bot_id}/stop')
+async def stop_project_bot(bot_id: str):
+    if not BOT_RUNNER_URL or not BOT_RUNNER_TOKEN: raise HTTPException(503,'The separate bot runtime is not configured.')
+    if not re.fullmatch(r'[a-f0-9]{12}',bot_id): raise HTTPException(400,'Invalid bot id.')
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r=await client.post(f'{BOT_RUNNER_URL}/bots/{bot_id}/stop',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN})
+        if r.status_code>=400: raise HTTPException(r.status_code,'Bot runtime could not stop that bot.')
+        return r.json()
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
 
 @app.post('/api/projects/{pid}/tasks')
 def create_task(pid: str, data: TaskIn):
