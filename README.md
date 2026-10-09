@@ -35,7 +35,7 @@ Open http://127.0.0.1:8000. Ollama defaults to `http://localhost:11434`; configu
 
 ## Hosted AI providers
 
-Foe supports DeepSeek as its primary OpenAI-compatible provider, with optional OpenRouter and Gemini fallbacks. Configure `AI_PROVIDER=deepseek`, `DEEPSEEK_API_KEY`, and optionally `AI_FALLBACK_PROVIDERS=openrouter,gemini` plus the corresponding fallback API keys in your service environment. Providers may have billing, quota, and rate limits; no hosted provider is unlimited.
+Foe supports Meta Model API (Muse Spark) as its primary OpenAI-compatible provider, with optional DeepSeek, OpenRouter, and Gemini fallbacks. Configure `AI_PROVIDER=meta`, `META_API_BASE_URL=https://api.meta.ai/v1`, `META_MODEL=muse-spark-1.3`, and `MODEL_API_KEY`; optionally set `AI_FALLBACK_PROVIDERS=deepseek,openrouter,gemini` plus the matching provider API keys. Providers may have billing, quota, and rate limits; no hosted provider is unlimited.
 
 ## Google sign-in and persistent storage
 
