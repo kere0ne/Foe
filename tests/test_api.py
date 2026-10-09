@@ -1,0 +1,41 @@
+import os
+import tempfile
+from pathlib import Path
+
+# Isolate persistent files for tests before importing the app.
+_tmp = tempfile.TemporaryDirectory()
+os.environ["FOE_DATA_DIR"] = _tmp.name
+
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_health():
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+def test_create_and_list_project():
+    created = client.post("/api/projects", json={"name": "demo"})
+    assert created.status_code == 200
+    project = created.json()
+    assert project["name"] == "demo"
+    listed = client.get("/api/projects")
+    assert any(item["id"] == project["id"] for item in listed.json())
+
+def test_file_round_trip_and_path_traversal():
+    project = client.post("/api/projects", json={"name": "files"}).json()
+    pid = project["id"]
+    saved = client.put(f"/api/projects/{pid}/file", json={"path": "src/main.py", "content": "print('hello')"})
+    assert saved.status_code == 200
+    read = client.get(f"/api/projects/{pid}/file", params={"path": "src/main.py"})
+    assert read.json()["content"] == "print('hello')"
+    blocked = client.put(f"/api/projects/{pid}/file", json={"path": "../escape.txt", "content": "no"})
+    assert blocked.status_code == 400
+
+def test_task_is_recorded_as_plan():
+    project = client.post("/api/projects", json={"name": "tasks"}).json()
+    response = client.post(f"/api/projects/{project['id']}/tasks", json={"prompt": "Add a test"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "planned"
