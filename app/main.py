@@ -25,7 +25,9 @@ app = FastAPI(title='Foe Agent API', version='0.2.0', description='AI software e
 @app.middleware('http')
 async def protect_api(request: Request, call_next):
     # Protect project/file mutation, agent execution, terminal and model endpoints on public hosting.
-    if FOE_ACCESS_KEY and request.url.path.startswith('/api/') and request.url.path != '/api/health':
+    if request.url.path.startswith('/api/') and request.url.path != '/api/health':
+        if not FOE_ACCESS_KEY:
+            return JSONResponse(status_code=503, content={'detail':'Foe is locked until FOE_ACCESS_KEY is configured in the Render environment variables.'})
         import hmac
         supplied = request.headers.get('x-foe-access', '')
         if not hmac.compare_digest(supplied, FOE_ACCESS_KEY):
@@ -68,7 +70,7 @@ class GithubFileIn(BaseModel): path: str = Field(min_length=1, max_length=500); 
 @app.get('/api/health')
 def health():
     con=db(); count=con.execute('SELECT COUNT(*) n FROM projects').fetchone()['n']; con.close()
-    return {'ok': True, 'service':'foe-agent', 'version':app.version, 'projects':count, 'access_required':bool(FOE_ACCESS_KEY), 'execution':'docker sandbox required' if not ALLOW_HOST_COMMANDS else 'host commands explicitly enabled'}
+    return {'ok': True, 'service':'foe-agent', 'version':app.version, 'projects':count, 'access_required':True, 'access_configured':bool(FOE_ACCESS_KEY), 'execution':'docker sandbox required' if not ALLOW_HOST_COMMANDS else 'host commands explicitly enabled'}
 
 @app.get('/api/models')
 async def models():
