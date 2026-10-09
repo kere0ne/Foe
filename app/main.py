@@ -77,6 +77,8 @@ def health():
 
 @app.get('/api/models')
 async def models():
+    if OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
+        return {'provider':'ollama-cloud','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':'Set OLLAMA_API_KEY in Render Environment. Create a key at https://ollama.com/settings/keys.'}
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             r=await client.get(f'{OLLAMA_URL}/api/tags', headers=ollama_headers()); r.raise_for_status(); payload=r.json()
@@ -150,6 +152,8 @@ async def upload(pid: str, file: UploadFile = File(...)):
 
 @app.post('/api/chat')
 async def chat(data: ChatIn):
+    if OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
+        raise HTTPException(503,'Ollama Cloud is selected but OLLAMA_API_KEY is missing. Create a key at https://ollama.com/settings/keys and add it in Render → Environment.')
     if not data.messages or any(m.get('role') not in {'system','user','assistant'} or not isinstance(m.get('content'),str) for m in data.messages):
         raise HTTPException(400,'Messages must contain valid roles and text content')
     async def stream():
@@ -335,6 +339,8 @@ async def execute_agent_tool(pid: str, name: str, args: dict[str, Any]) -> dict[
 
 @app.post('/api/projects/{pid}/agent')
 async def run_agent(pid: str, data: AgentIn):
+    if OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
+        raise HTTPException(503,'Ollama Cloud is selected but OLLAMA_API_KEY is missing. Create a key at https://ollama.com/settings/keys and add it in Render → Environment.')
     base=project_path(pid)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
         try:
