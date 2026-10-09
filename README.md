@@ -1,6 +1,6 @@
 # Foe Agent
 
-**An early-stage, local-first AI software engineering workspace.** Foe Agent provides a FastAPI backend and browser UI for project/file management, code editing, Ollama chat streaming, file uploads, task planning, and Docker-backed command execution.
+**An early-stage, local-first AI software engineering workspace.** Foe Agent provides a FastAPI backend and browser UI for project/file management, code editing, DeepSeek-compatible chat, file uploads, task planning, and optional sandboxed command execution.
 
 ## Features
 
@@ -15,7 +15,7 @@
 
 ## Important security notice
 
-This is a **prototype**, not a production-ready public service. Authentication and per-user authorization are not implemented. Do not expose this service to the public internet or use it with multiple untrusted users. Review [SECURITY.md](SECURITY.md) and [docs/SANDBOX.md](docs/SANDBOX.md). Never enable `FOE_ALLOW_HOST_COMMANDS=true` on a public/shared deployment.
+This is a **prototype**, not a production-ready public service. Google OAuth sign-in and per-user authorization are implemented; complete the Google and persistent-storage setup before public use. Do not expose this service to the public internet or use it with multiple untrusted users. Review [SECURITY.md](SECURITY.md) and [docs/SANDBOX.md](docs/SANDBOX.md). Never enable `FOE_ALLOW_HOST_COMMANDS=true` on a public/shared deployment.
 
 ## Quick start
 
@@ -36,6 +36,10 @@ Open http://127.0.0.1:8000. Ollama defaults to `http://localhost:11434`; configu
 ## Hosted AI providers
 
 Foe supports DeepSeek as its primary OpenAI-compatible provider, with optional OpenRouter and Gemini fallbacks. Configure `AI_PROVIDER=deepseek`, `DEEPSEEK_API_KEY`, and optionally `AI_FALLBACK_PROVIDERS=openrouter,gemini` plus the corresponding fallback API keys in your service environment. Providers may have billing, quota, and rate limits; no hosted provider is unlimited.
+
+## Google sign-in and persistent storage
+
+Foe uses Google OAuth only. Follow [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_SETUP.md) to configure the Google OAuth client and persistent database/storage. The app supports PostgreSQL via `DATABASE_URL`; project files are stored under `FOE_DATA_DIR`, which must point to a Render persistent disk mount (for example `/var/data`) to survive restarts. The current free web service has ephemeral storage, so a database alone does not preserve project files.
 
 ## GitHub MCP and Discord bot runtime
 
@@ -60,7 +64,7 @@ pytest -q
 
 ## Deploying to Render
 
-A `render.yaml` Blueprint is included. **Before using the public service, set `FOE_ACCESS_KEY`** to a long random secret in Render → your service → Environment. The API fails closed until this is configured. Enter the same value in the Foe browser prompt. Do not commit the key or put it in source code. After pushing this repository, open [Render Blueprint](https://dashboard.render.com/blueprint/new?repo=https://github.com/kere0ne/Foe) and apply it. Set `OLLAMA_BASE_URL` to an Ollama API endpoint reachable from Render. `localhost:11434` on Render is not your personal computer. Free instance storage is ephemeral, so project files and SQLite data can be lost on restarts/redeploys. Do not publicly expose this prototype until authentication and production hardening are implemented.
+A `render.yaml` Blueprint is included. **Before using the public service, set `FOE_ACCESS_KEY`** to a long random secret in Render → your service → Environment. The service uses Google OAuth for account access. Configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in Render; configure `DATABASE_URL` for durable account/session/project metadata and set `FOE_DATA_DIR` to a persistent disk mount for project files. Never commit secrets.
 
 ## Current limitations
 
