@@ -2,64 +2,87 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#090b10">
-<meta name="description" content="Foe Agent — your AI software engineering workspace.">
-<title>Foe Agent — AI Workspace</title>
+<meta name="theme-color" content="#f8f8f6">
+<meta name="description" content="Foe Agent — an AI agent for research, coding, and getting work done.">
+<title>Foe Agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700;750;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="app-shell">
-  <aside class="sidebar">
-    <a class="brand" href="/" aria-label="Foe Agent home"><span class="brand-mark"><span>f</span><i></i></span><span class="brand-copy"><strong>foe<span>agent</span></strong><small>AI DEVELOPMENT STUDIO</small></span></a>
-    <button id="newProject" class="new-project"><span>＋</span> New workspace <kbd>⌘ K</kbd></button>
-    <div class="side-label">YOUR WORKSPACE</div>
-    <div class="nav-item active"><span class="nav-icon">⌘</span> Overview <span class="nav-trailing">⌁</span></div>
-    <div class="side-label project-label">PROJECTS <button id="quickNew" title="New project">＋</button></div>
-    <div id="projects" class="projects"><div class="sidebar-empty">Your projects will show up here.</div></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <a class="brand" href="/" aria-label="Foe Agent"><span class="brand-mark">f<span>✳</span></span><span class="brand-name">foe<span>agent</span></span></a>
+      <button class="square-button" id="collapseSidebar" title="Toggle sidebar">☰</button>
+    </div>
+    <button id="newProject" class="new-agent"><span class="plus-icon">＋</span> New agent</button>
+    <button id="clearChat" class="side-action"><span>✎</span> New chat <kbd>⌘ K</kbd></button>
+    <div class="side-section-title">WORKSPACE</div>
+    <button class="side-action" id="openStudio"><span>▦</span> My workspace <span class="side-chevron">↗</span></button>
+    <div class="side-section-title project-title">PROJECTS <button id="quickNew" title="New project">＋</button></div>
+    <div id="projects" class="projects"><div class="sidebar-empty">Your projects appear here.</div></div>
     <div class="sidebar-spacer"></div>
-    <div class="provider-card"><div class="provider-top"><span class="provider-orb">✳</span><span class="provider-label">MODEL CONNECTION</span><span id="dot" class="status-dot"></span></div><strong id="modelStatus">Checking model…</strong><p id="modelName">Looking for your AI provider</p><button id="refresh" class="refresh-button"><span>↻</span> Check connection</button></div>
-    <div class="sidebar-footer"><span class="avatar">F</span><span><strong>Foe Workspace</strong><small>Personal environment</small></span><span class="footer-menu">•••</span></div>
+    <div class="sidebar-bottom">
+      <div class="model-health"><span id="dot" class="status-dot"></span><div><strong id="modelStatus">Checking AI model…</strong><small id="modelName">Checking connection</small></div><button id="refresh" title="Refresh connection">↻</button></div>
+      <div class="account-row"><span class="account-avatar">F</span><span><strong>Foe Agent</strong><small>Personal workspace</small></span><button class="account-more">•••</button></div>
+    </div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="heading">New conversation</strong></div><div class="topbar-actions"><span class="secure-tag"><span class="secure-dot"></span> WORKSPACE MODE</span><button id="clearChat" class="icon-button" title="New conversation">＋ <span>New chat</span></button></div></header>
-    <div class="content-grid">
-      <section class="chat-area">
-        <div class="chat-scroll" id="chatScroll">
-          <div id="welcome" class="welcome">
-            <div class="welcome-chip"><span class="chip-star">✳</span> YOUR AI ENGINEERING PARTNER</div>
-            <h1>Make something<br><span>remarkable.</span></h1>
-            <p class="welcome-copy">From the first idea to the final commit. Think through problems, explore code, and build your next big thing with Foe.</p>
-            <div class="suggestions">
-              <button data-prompt="Help me plan and build a modern full-stack application. Start by asking what I want to make, then create a clear implementation plan."><span class="suggestion-icon violet">✦</span><span><strong>Build an application</strong><small>Go from idea to architecture</small></span><span class="suggestion-arrow">↗</span></button>
-              <button data-prompt="Review my current project files. Explain the architecture, identify bugs or weak spots, and suggest the highest-impact improvements."><span class="suggestion-icon blue">⌕</span><span><strong>Understand my code</strong><small>Analyze files and find issues</small></span><span class="suggestion-arrow">↗</span></button>
-              <button data-prompt="Help me debug an issue. Ask for the error and relevant code, then walk me through a reliable fix and tests."><span class="suggestion-icon orange">⌁</span><span><strong>Debug a problem</strong><small>Track down what's broken</small></span><span class="suggestion-arrow">↗</span></button>
-              <button data-prompt="Act as my senior software engineer. Help me improve this project with clean, maintainable code, tests, and clear explanations."><span class="suggestion-icon green">⌘</span><span><strong>Improve my code</strong><small>Refactor and level up</small></span><span class="suggestion-arrow">↗</span></button>
-            </div>
-          </div>
-          <div id="messages" class="messages"></div>
+    <header class="topbar">
+      <div class="topbar-left"><button id="mobileMenu" class="square-button mobile-menu" title="Open menu">☰</button><span class="breadcrumb">Agent</span><span class="top-divider">/</span><strong id="heading">New conversation</strong></div>
+      <div class="topbar-right"><button id="openStudioTop" class="workspace-button"><span>▦</span> Workspace</button><button id="agentMode" class="mode-button"><span class="mode-spark">✳</span> Agent mode <span class="chevron">⌄</span></button></div>
+    </header>
+    <section class="agent-screen" id="agentScreen">
+      <div class="hero">
+        <div class="hero-mark"><span>f</span><i>✳</i></div>
+        <p class="eyebrow">MEET YOUR NEW AI AGENT</p>
+        <h1>Experience<br><span>what's possible.</span></h1>
+        <p class="hero-subtitle">One agent for the things you want to get done.<br>Explore ideas, work with your files, and build something great.</p>
+        <div class="quick-prompts">
+          <button data-prompt="Research this topic thoroughly, compare trustworthy sources, and give me a concise report with links: "><span class="quick-icon research">⌕</span><span>Research a topic</span><span class="quick-arrow">↗</span></button>
+          <button data-prompt="Help me build a working application. First clarify the goal, then propose an architecture and a step-by-step implementation plan: "><span class="quick-icon build">⌘</span><span>Build an app</span><span class="quick-arrow">↗</span></button>
+          <button data-prompt="Review the files in my selected project. Explain what it does, find bugs, and suggest the most important improvements."><span class="quick-icon code">⌁</span><span>Work with code</span><span class="quick-arrow">↗</span></button>
         </div>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="composer-wrap">
         <form id="chatForm" class="composer">
-          <div class="composer-top"><span class="composer-context"><span class="context-pulse"></span><span id="composerContext">General conversation</span></span><span class="composer-hint">AI can make mistakes. Verify important changes.</span></div>
-          <textarea id="prompt" rows="2" placeholder="Ask Foe to build, debug, explain, or improve something…" required></textarea>
-          <div class="composer-bottom"><div class="composer-tools"><button type="button" id="attachFile" class="tool-button" title="Upload files">＋ <span>Attach files</span></button><input id="fileUpload" type="file" multiple hidden><span class="tool-divider"></span><span class="model-indicator"><span class="tiny-orb">✳</span><span id="composerModel">Ollama · checking…</span></span></div><button class="send-button" type="submit"><span>Send message</span><span class="send-arrow">↑</span></button></div>
+          <textarea id="prompt" rows="2" placeholder="Ask anything, or tell Foe what you want done…" required></textarea>
+          <div class="composer-bottom">
+            <div class="composer-left">
+              <button type="button" id="attachFile" class="composer-tool" title="Attach files"><span class="tool-plus">＋</span><span>Attach</span></button>
+              <input id="fileUpload" type="file" multiple hidden>
+              <span class="tool-divider"></span>
+              <button type="button" id="modelPicker" class="model-picker"><span class="model-spark">✳</span><span id="composerModel">Checking model…</span><span class="chevron">⌄</span></button>
+            </div>
+            <div class="composer-right"><span class="enter-hint">↵ to send · shift + ↵ for new line</span><button class="send-button" type="submit" aria-label="Send message"><span>Send</span><span class="send-arrow">↑</span></button></div>
+          </div>
           <div id="uploadStatus" class="upload-status" aria-live="polite"></div>
         </form>
-        <div class="bottom-note"><span>✳</span> Built for builders. Your workspace, your workflow.</div>
-      </section>
-      <aside class="tools-panel">
-        <div class="tools-heading"><div><span class="panel-eyebrow">DEVELOPMENT</span><h2>Studio</h2></div><span class="studio-mark">⌘</span></div>
-        <div class="studio-tabs"><button class="tab active" data-tab="files"><span>▤</span> Files</button><button class="tab" data-tab="editor"><span>⌁</span> Editor</button><button class="tab" data-tab="terminal"><span>›_</span> Terminal</button><button class="tab" data-tab="tasks"><span>☷</span> Tasks</button></div>
-        <div id="filesView" class="view"><div class="viewhead"><div><strong>Project explorer</strong><small id="fileSubhead">Select a workspace to begin</small></div><div class="view-actions"><button id="uploadProject" class="mini-icon" title="Upload file or ZIP">↑</button><input id="projectUpload" type="file" hidden><button id="newFile" class="mini-icon" title="Create file">＋</button></div></div><div class="tree-root"><span class="tree-chevron">⌄</span><span class="folder-icon">▰</span><span id="treeProjectName">workspace</span></div><div id="fileList" class="filelist empty">Create or select a project to see its files.</div><div class="panel-footnote"><span class="footnote-icon">ⓘ</span><span>Upload individual files or a ZIP archive to start working on an existing codebase.</span></div></div>
-        <div id="editorView" class="view hidden"><div class="viewhead"><div><strong id="editName">No file selected</strong><small>Workspace editor</small></div><button id="saveFile" class="save-button" disabled>Save changes</button></div><textarea id="editor" spellcheck="false" placeholder="Select a file from the Files tab to edit it…"></textarea><div class="editor-foot"><span>UTF-8</span><span>Plain text editor</span></div></div>
-        <div id="terminalView" class="view hidden"><div class="viewhead"><div><strong>Sandbox terminal</strong><small>Run a command in your project</small></div><span class="terminal-badge">RESTRICTED</span></div><div class="terminal-info"><span>⌁</span><p>Commands require Docker and run without network access. On hosted Render, terminal execution is not available by default.</p></div><form id="termForm" class="termform"><span class="prompt-sign">$</span><input id="command" placeholder="python --version" required><button class="run-button">Run ↗</button></form><pre id="termOutput">Foe terminal ready.
-Select a project to begin.</pre></div>
-        <div id="tasksView" class="view hidden"><div class="viewhead"><div><strong>Task board</strong><small>Track your agent's work</small></div><span class="task-count" id="taskCount">0 tasks</span></div><div id="taskList" class="filelist empty">No tasks yet. Ask Foe to help plan your next step.</div><div class="task-note"><strong>Agent workflow</strong><p>Plans are saved here for review. Autonomous execution is not yet enabled in this prototype.</p></div></div>
-        <div class="studio-footer"><span class="footer-status"><span class="secure-dot"></span> Private workspace UI</span><span>v0.2 preview</span></div>
-      </aside>
-    </div>
+        <div class="connector-row"><span class="connector-label">CONNECT</span>
+          <button class="connector" data-connector="GitHub"><span class="connector-icon github">⌘</span> GitHub <span class="connector-plus">＋</span></button>
+          <button class="connector" data-connector="Google Drive"><span class="connector-icon drive">△</span> Drive <span class="connector-plus">＋</span></button>
+          <button class="connector" data-connector="Google Docs"><span class="connector-icon docs">▤</span> Docs <span class="connector-plus">＋</span></button>
+          <button class="connector" data-connector="Notion"><span class="connector-icon notion">N</span> Notion <span class="connector-plus">＋</span></button>
+          <button class="connector" data-connector="Gmail"><span class="connector-icon gmail">✉</span> Gmail <span class="connector-plus">＋</span></button>
+          <button class="connector more-connectors" id="moreConnectors" title="More connectors">•••</button>
+        </div>
+        <p class="disclaimer">Foe can make mistakes. Review important information before acting on it.</p>
+      </div>
+    </section>
   </main>
+</div>
+<div id="studioOverlay" class="studio-overlay hidden">
+  <div class="studio-drawer">
+    <header class="drawer-header"><div><span class="drawer-eyebrow">FOE AGENT</span><h2>Workspace</h2></div><button id="closeStudio" class="square-button">✕</button></header>
+    <div class="studio-tabs"><button class="tab active" data-tab="files">Files</button><button class="tab" data-tab="editor">Editor</button><button class="tab" data-tab="terminal">Terminal</button><button class="tab" data-tab="tasks">Tasks</button></div>
+    <div id="filesView" class="view"><div class="viewhead"><div><strong>Project explorer</strong><small id="fileSubhead">Select a workspace to begin</small></div><div class="view-actions"><button id="uploadProject" class="mini-icon" title="Upload file or ZIP">↑</button><input id="projectUpload" type="file" hidden><button id="newFile" class="mini-icon" title="Create file">＋</button></div></div><div class="tree-root"><span>⌄</span><span class="folder-icon">▰</span><span id="treeProjectName">workspace</span></div><div id="fileList" class="filelist empty">Create or select a project to see its files.</div><div class="panel-footnote">Upload individual files or a ZIP archive to work with an existing codebase.</div></div>
+    <div id="editorView" class="view hidden"><div class="viewhead"><div><strong id="editName">No file selected</strong><small>Workspace editor</small></div><button id="saveFile" class="save-button" disabled>Save</button></div><textarea id="editor" spellcheck="false" placeholder="Select a file to edit…"></textarea><div class="editor-foot"><span>UTF-8</span><span>Plain text editor</span></div></div>
+    <div id="terminalView" class="view hidden"><div class="viewhead"><div><strong>Sandbox terminal</strong><small>Run a command in your project</small></div><span class="terminal-badge">RESTRICTED</span></div><div class="terminal-info">Commands require Docker and run without network access. Hosted terminal execution is not enabled on Render by default.</div><form id="termForm" class="termform"><span class="prompt-sign">$</span><input id="command" placeholder="python --version" required><button class="run-button">Run ↗</button></form><pre id="termOutput">Foe terminal ready. Select a project to begin.</pre></div>
+    <div id="tasksView" class="view hidden"><div class="viewhead"><div><strong>Agent tasks</strong><small>Plans saved for review</small></div><span class="task-count" id="taskCount">0 tasks</span></div><div id="taskList" class="filelist empty">No tasks yet.</div><div class="task-note"><strong>Agent workflow</strong><p>Autonomous execution is not yet enabled in this prototype.</p></div></div>
+    <div class="drawer-footer"><span id="drawerProject">No project selected</span><span>Foe preview</span></div>
+  </div>
 </div>
 <div id="toast" class="toast" role="status"></div>
 <script src="/static/app.js"></script>
