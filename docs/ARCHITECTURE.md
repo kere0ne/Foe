@@ -1,11 +1,10 @@
-# Architecture
-
-Foe Agent is a small local-first application.
+# Foe architecture
 
 - **Frontend:** static HTML, CSS, and JavaScript served by FastAPI.
-- **API:** FastAPI routes project management, file operations, uploads, task records, terminal requests, and model chat.
-- **Persistence:** SQLite stores project metadata and task history; project files are stored under `FOE_DATA_DIR/projects`.
-- **Model provider:** the backend proxies streaming chat requests to an Ollama server configured with `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
-- **Command execution:** by default, terminal commands are sent to a Docker container with network disabled, resource limits, dropped capabilities, and a read-only root filesystem.
+- **API:** FastAPI routes chat, project/file management, uploads, task planning, terminal requests, and model chat.
+- **Local AI:** Ollama runs the selected open model. Docker Compose keeps the model endpoint on a private internal network and persists model weights in a named volume.
+- **Persistence:** SQLite stores project metadata and task history; project files live under `FOE_DATA_DIR/projects`. The local Compose configuration persists data in named Docker volumes.
+- **Coding agent:** Agent mode sends project context to the model and can call Foe's project tools. It reports the actions returned by those tools; users should review generated changes.
+- **Command execution:** approved checks run in a constrained Docker container with networking disabled, bounded resources, dropped capabilities, and a read-only root filesystem.
 
-Task records currently represent plans only. They do not imply autonomous completion or verified code changes.
+Foe is your own application using an existing open model; it does not train a frontier model from scratch. Model quality and speed depend on your hardware and selected model. The public Render deployment does not have enough free compute to host Ollama alongside the web app; use the local Compose setup for API-key-free local inference.
