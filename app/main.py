@@ -283,6 +283,9 @@ def auth_logout(authorization: str | None = Header(default=None)):
     return {'ok':True}
 
 
+class MemoryIn(BaseModel): content: str = Field(min_length=1, max_length=1000)
+
+
 @app.get('/api/memories')
 def list_memories(request: Request):
     uid=getattr(request.state,'user_id','legacy')
@@ -338,7 +341,6 @@ def safe_file(base: Path, relative: str) -> Path:
 class ProjectIn(BaseModel): name: str = Field(min_length=1, max_length=100)
 class FileIn(BaseModel): path: str; content: str
 class ChatIn(BaseModel): messages: list[dict[str, str]]; model: str | None = None; temperature: float = Field(default=0.2, ge=0, le=2)
-class MemoryIn(BaseModel): content: str = Field(min_length=1, max_length=1000)
 class TaskIn(BaseModel): prompt: str = Field(min_length=1, max_length=12000)
 class CommandIn(BaseModel): command: str = Field(min_length=1, max_length=2000); timeout: int = Field(default=15, ge=1, le=60)
 class AgentIn(BaseModel): prompt: str = Field(min_length=1, max_length=12000); model: str | None = None; max_steps: int = Field(default=8, ge=1, le=12)
