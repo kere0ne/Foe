@@ -42,7 +42,7 @@ def unpack_model_message(payload):
         choices=payload.get('choices') or []
         return choices[0].get('message',{}) if choices else {}
     return payload.get('message',{})
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemini-3.8-flash' if AI_PROVIDER == 'gemini' else 'qwen2.5-coder:7b')
+DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemini-2.5-flash' if AI_PROVIDER == 'gemini' else 'qwen2.5-coder:7b')
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
