@@ -40,7 +40,7 @@ async function connectGitHub(){
   const answer=prompt('Connected as @'+status.login+'. Enter a repository number or full name to import into Foe:\\n\\n'+list+'\\n\\nType disconnect to remove the token from this browser.',repos[0].full_name);
   if(!answer)return;if(answer.trim().toLowerCase()==='disconnect'){localStorage.removeItem('foe_github_token');toast('GitHub token removed from this browser');return}
   const selected=repos.find((r,i)=>String(i+1)===answer.trim()||r.full_name.toLowerCase()===answer.trim().toLowerCase());
-  if(!selected){toast('Repository not found in the list');return}
+  if(!selected){toast('Repository not found in the list');return}localStorage.setItem('foe_github_repo',selected.full_name);$('#pushGithubFile').disabled=false;
   if(!project){project=await api('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selected.name})});await refresh()}
   toast('Importing '+selected.full_name+'…');
   const result=await fetch('/api/github/import/'+encodeURIComponent(selected.full_name.split('/')[0])+'/'+encodeURIComponent(selected.name),{method:'POST',headers:{'Content-Type':'application/json',...authHeaders},body:JSON.stringify({project_id:project.id,branch:selected.default_branch})}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'Import failed');return d});
