@@ -1,1 +1,66 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Foe Agent</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="shell"><aside><div class="brand"><span class="logo">F</span><div><b>FOE AGENT</b><small>LOCAL DEV WORKSPACE</small></div></div><button id="newProject" class="primary">＋ New project</button><div class="section">WORKSPACES</div><div id="projects" class="projects"></div><div class="sidebottom"><div class="modelstate"><span id="dot" class="dot"></span><div><b id="modelStatus">Checking model…</b><small id="modelName">Ollama provider</small></div></div><button id="refresh" class="ghost">↻ Refresh status</button></div></aside><main><header><div><div class="eyebrow">PERSONAL SOFTWARE ENGINEER</div><h1 id="heading">What are we building?</h1></div><div class="headerRight"><span class="pill">LOCAL-FIRST</span><span class="pill">SANDBOXED EXECUTION</span></div></header><div class="workspace"><section class="chatpanel"><div id="welcome" class="welcome"><div class="spark">✳</div><h2>Ship software with an agent.</h2><p>Ask questions, inspect a project, and work with your local model. Your files stay in your workspace.</p><div class="suggestions"><button data-prompt="Inspect this project and explain its architecture.">⌘ Inspect my project</button><button data-prompt="Help me debug the current error. Ask me for logs if needed.">⚒ Debug an error</button><button data-prompt="Plan a responsive full-stack app and list the first implementation steps.">◈ Plan an application</button></div></div><div id="messages" class="messages"></div><form id="chatForm" class="composer"><textarea id="prompt" rows="3" placeholder="Describe what you want to build… (Enter to send)" required></textarea><div class="composerfoot"><span>AI output depends on your configured local model.</span><button class="primary" type="submit">Send ↑</button></div></form></section><section class="devpanel"><div class="tabs"><button class="tab active" data-tab="files">Files</button><button class="tab" data-tab="editor">Editor</button><button class="tab" data-tab="terminal">Terminal</button><button class="tab" data-tab="tasks">Tasks</button></div><div id="filesView" class="view"><div class="viewhead"><b>Project files</b><button id="newFile" class="ghost small">＋ File</button></div><div id="fileList" class="filelist empty">Create or select a project to begin.</div></div><div id="editorView" class="view hidden"><div class="viewhead"><b id="editName">No file selected</b><button id="saveFile" class="primary small" disabled>Save</button></div><textarea id="editor" spellcheck="false" placeholder="Select a file from the Files tab…"></textarea></div><div id="terminalView" class="view hidden"><div class="viewhead"><b>Sandbox terminal</b><span class="pill">Docker required</span></div><p class="hint">Commands run in a restricted Docker container with no network access. Host execution is disabled by default.</p><form id="termForm" class="termform"><span>$</span><input id="command" placeholder="python --version" required><button class="primary small">Run</button></form><pre id="termOutput">Terminal ready. Select a project to run commands.</pre></div><div id="tasksView" class="view hidden"><div class="viewhead"><b>Agent task queue</b></div><div id="taskList" class="filelist empty">No tasks yet.</div><p class="hint">Current build records task plans. Autonomous tool execution and multi-agent coordination are planned, not yet enabled.</p></div></section></div></main></div><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090b10">
+<meta name="description" content="Foe Agent — your AI software engineering workspace.">
+<title>Foe Agent — AI Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Foe Agent home"><span class="brand-mark"><span>f</span><i></i></span><span class="brand-copy"><strong>foe<span>agent</span></strong><small>AI DEVELOPMENT STUDIO</small></span></a>
+    <button id="newProject" class="new-project"><span>＋</span> New workspace <kbd>⌘ K</kbd></button>
+    <div class="side-label">YOUR WORKSPACE</div>
+    <div class="nav-item active"><span class="nav-icon">⌘</span> Overview <span class="nav-trailing">⌁</span></div>
+    <div class="side-label project-label">PROJECTS <button id="quickNew" title="New project">＋</button></div>
+    <div id="projects" class="projects"><div class="sidebar-empty">Your projects will show up here.</div></div>
+    <div class="sidebar-spacer"></div>
+    <div class="provider-card"><div class="provider-top"><span class="provider-orb">✳</span><span class="provider-label">MODEL CONNECTION</span><span id="dot" class="status-dot"></span></div><strong id="modelStatus">Checking model…</strong><p id="modelName">Looking for your AI provider</p><button id="refresh" class="refresh-button"><span>↻</span> Check connection</button></div>
+    <div class="sidebar-footer"><span class="avatar">F</span><span><strong>Foe Workspace</strong><small>Personal environment</small></span><span class="footer-menu">•••</span></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="heading">New conversation</strong></div><div class="topbar-actions"><span class="secure-tag"><span class="secure-dot"></span> WORKSPACE MODE</span><button id="clearChat" class="icon-button" title="New conversation">＋ <span>New chat</span></button></div></header>
+    <div class="content-grid">
+      <section class="chat-area">
+        <div class="chat-scroll" id="chatScroll">
+          <div id="welcome" class="welcome">
+            <div class="welcome-chip"><span class="chip-star">✳</span> YOUR AI ENGINEERING PARTNER</div>
+            <h1>Make something<br><span>remarkable.</span></h1>
+            <p class="welcome-copy">From the first idea to the final commit. Think through problems, explore code, and build your next big thing with Foe.</p>
+            <div class="suggestions">
+              <button data-prompt="Help me plan and build a modern full-stack application. Start by asking what I want to make, then create a clear implementation plan."><span class="suggestion-icon violet">✦</span><span><strong>Build an application</strong><small>Go from idea to architecture</small></span><span class="suggestion-arrow">↗</span></button>
+              <button data-prompt="Review my current project files. Explain the architecture, identify bugs or weak spots, and suggest the highest-impact improvements."><span class="suggestion-icon blue">⌕</span><span><strong>Understand my code</strong><small>Analyze files and find issues</small></span><span class="suggestion-arrow">↗</span></button>
+              <button data-prompt="Help me debug an issue. Ask for the error and relevant code, then walk me through a reliable fix and tests."><span class="suggestion-icon orange">⌁</span><span><strong>Debug a problem</strong><small>Track down what's broken</small></span><span class="suggestion-arrow">↗</span></button>
+              <button data-prompt="Act as my senior software engineer. Help me improve this project with clean, maintainable code, tests, and clear explanations."><span class="suggestion-icon green">⌘</span><span><strong>Improve my code</strong><small>Refactor and level up</small></span><span class="suggestion-arrow">↗</span></button>
+            </div>
+          </div>
+          <div id="messages" class="messages"></div>
+        </div>
+        <form id="chatForm" class="composer">
+          <div class="composer-top"><span class="composer-context"><span class="context-pulse"></span><span id="composerContext">General conversation</span></span><span class="composer-hint">AI can make mistakes. Verify important changes.</span></div>
+          <textarea id="prompt" rows="2" placeholder="Ask Foe to build, debug, explain, or improve something…" required></textarea>
+          <div class="composer-bottom"><div class="composer-tools"><button type="button" id="attachFile" class="tool-button" title="Upload files">＋ <span>Attach files</span></button><input id="fileUpload" type="file" multiple hidden><span class="tool-divider"></span><span class="model-indicator"><span class="tiny-orb">✳</span><span id="composerModel">Ollama · checking…</span></span></div><button class="send-button" type="submit"><span>Send message</span><span class="send-arrow">↑</span></button></div>
+          <div id="uploadStatus" class="upload-status" aria-live="polite"></div>
+        </form>
+        <div class="bottom-note"><span>✳</span> Built for builders. Your workspace, your workflow.</div>
+      </section>
+      <aside class="tools-panel">
+        <div class="tools-heading"><div><span class="panel-eyebrow">DEVELOPMENT</span><h2>Studio</h2></div><span class="studio-mark">⌘</span></div>
+        <div class="studio-tabs"><button class="tab active" data-tab="files"><span>▤</span> Files</button><button class="tab" data-tab="editor"><span>⌁</span> Editor</button><button class="tab" data-tab="terminal"><span>›_</span> Terminal</button><button class="tab" data-tab="tasks"><span>☷</span> Tasks</button></div>
+        <div id="filesView" class="view"><div class="viewhead"><div><strong>Project explorer</strong><small id="fileSubhead">Select a workspace to begin</small></div><div class="view-actions"><button id="uploadProject" class="mini-icon" title="Upload file or ZIP">↑</button><input id="projectUpload" type="file" hidden><button id="newFile" class="mini-icon" title="Create file">＋</button></div></div><div class="tree-root"><span class="tree-chevron">⌄</span><span class="folder-icon">▰</span><span id="treeProjectName">workspace</span></div><div id="fileList" class="filelist empty">Create or select a project to see its files.</div><div class="panel-footnote"><span class="footnote-icon">ⓘ</span><span>Upload individual files or a ZIP archive to start working on an existing codebase.</span></div></div>
+        <div id="editorView" class="view hidden"><div class="viewhead"><div><strong id="editName">No file selected</strong><small>Workspace editor</small></div><button id="saveFile" class="save-button" disabled>Save changes</button></div><textarea id="editor" spellcheck="false" placeholder="Select a file from the Files tab to edit it…"></textarea><div class="editor-foot"><span>UTF-8</span><span>Plain text editor</span></div></div>
+        <div id="terminalView" class="view hidden"><div class="viewhead"><div><strong>Sandbox terminal</strong><small>Run a command in your project</small></div><span class="terminal-badge">RESTRICTED</span></div><div class="terminal-info"><span>⌁</span><p>Commands require Docker and run without network access. On hosted Render, terminal execution is not available by default.</p></div><form id="termForm" class="termform"><span class="prompt-sign">$</span><input id="command" placeholder="python --version" required><button class="run-button">Run ↗</button></form><pre id="termOutput">Foe terminal ready.
+Select a project to begin.</pre></div>
+        <div id="tasksView" class="view hidden"><div class="viewhead"><div><strong>Task board</strong><small>Track your agent's work</small></div><span class="task-count" id="taskCount">0 tasks</span></div><div id="taskList" class="filelist empty">No tasks yet. Ask Foe to help plan your next step.</div><div class="task-note"><strong>Agent workflow</strong><p>Plans are saved here for review. Autonomous execution is not yet enabled in this prototype.</p></div></div>
+        <div class="studio-footer"><span class="footer-status"><span class="secure-dot"></span> Private workspace UI</span><span>v0.2 preview</span></div>
+      </aside>
+    </div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="/static/app.js"></script>
+</body></html>
