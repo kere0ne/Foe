@@ -7,12 +7,18 @@ _tmp = tempfile.TemporaryDirectory()
 os.environ["FOE_DATA_DIR"] = _tmp.name
 
 from fastapi.testclient import TestClient
-from app.main import app
+from app.main import app, db, create_session
+import time, uuid
 
 client = TestClient(app)
-_test_auth = client.post('/api/auth/register', json={'email':'foe-tests@example.com','password':'test-password-123'})
-assert _test_auth.status_code == 200
-client.headers.update({'Authorization': 'Bearer ' + _test_auth.json()['token']})
+con = db()
+_test_uid = uuid.uuid4().hex
+con.execute('INSERT INTO users(id,email,password_hash,google_sub,created_at) VALUES(?,?,?,?,?)',
+            (_test_uid, 'foe-tests@example.com', '', 'google-test-subject', time.time()))
+_test_token = create_session(con, _test_uid)
+con.commit()
+con.close()
+client.headers.update({'Authorization': 'Bearer ' + _test_token})
 
 def test_health():
     response = client.get("/api/health")
