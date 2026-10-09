@@ -14,6 +14,9 @@ ROOT.mkdir(parents=True, exist_ok=True); PROJECTS.mkdir(parents=True, exist_ok=T
 DB = ROOT / 'foe.db'
 MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
+OLLAMA_API_KEY = os.getenv('OLLAMA_API_KEY', '').strip()
+def ollama_headers():
+    return {'Authorization': f'Bearer {OLLAMA_API_KEY}'} if OLLAMA_API_KEY else {}
 DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
@@ -76,10 +79,10 @@ def health():
 async def models():
     try:
         async with httpx.AsyncClient(timeout=3) as client:
-            r=await client.get(f'{OLLAMA_URL}/api/tags'); r.raise_for_status(); payload=r.json()
+            r=await client.get(f'{OLLAMA_URL}/api/tags', headers=ollama_headers()); r.raise_for_status(); payload=r.json()
         return {'provider':'ollama','connected':True,'default_model':DEFAULT_MODEL,'models':[m.get('name') for m in payload.get('models',[])]}
     except Exception as e:
-        return {'provider':'ollama','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':f'Cannot reach Ollama at {OLLAMA_URL}: {type(e).__name__}'}
+        return {'provider':'ollama','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':f'Cannot reach or authenticate with model provider at {OLLAMA_URL}: {type(e).__name__}'}
 
 @app.post('/api/projects')
 def create_project(data: ProjectIn):
@@ -152,7 +155,7 @@ async def chat(data: ChatIn):
     async def stream():
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
-                async with client.stream('POST', f'{OLLAMA_URL}/api/chat', json={'model':data.model or DEFAULT_MODEL,'messages':data.messages,'stream':True,'options':{'temperature':data.temperature}}) as response:
+                async with client.stream('POST', f'{OLLAMA_URL}/api/chat', headers=ollama_headers(), json={'model':data.model or DEFAULT_MODEL,'messages':data.messages,'stream':True,'options':{'temperature':data.temperature}}) as response:
                     if response.status_code >= 400:
                         body=(await response.aread()).decode('utf-8', errors='replace')
                         yield 'data: ' + json.dumps({'error':f'AI provider returned HTTP {response.status_code}: {body[:500]}'}) + '\n\n'
@@ -350,7 +353,7 @@ async def run_agent(pid: str, data: AgentIn):
             ]
             steps=[]; final=''
             for _ in range(data.max_steps):
-                r=await client.post(f'{OLLAMA_URL}/api/chat',json={'model':model,'messages':messages,'tools':AGENT_TOOLS,'stream':False,'options':{'temperature':0.1}})
+                r=await client.post(f'{OLLAMA_URL}/api/chat',headers=ollama_headers(),json={'model':model,'messages':messages,'tools':AGENT_TOOLS,'stream':False,'options':{'temperature':0.1}})
                 if r.status_code>=400: raise HTTPException(502,'Model provider error: '+r.text[:400])
                 msg=r.json().get('message',{})
                 calls=msg.get('tool_calls') or []
