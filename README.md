@@ -52,7 +52,7 @@ pytest -q
 
 ## Deploying to Render
 
-A `render.yaml` Blueprint is included. After pushing this repository, open [Render Blueprint](https://dashboard.render.com/blueprint/new?repo=https://github.com/kere0ne/Foe) and apply it. Set `OLLAMA_BASE_URL` to an Ollama API endpoint reachable from Render. `localhost:11434` on Render is not your personal computer. Free instance storage is ephemeral, so project files and SQLite data can be lost on restarts/redeploys. Do not publicly expose this prototype until authentication and production hardening are implemented.
+A `render.yaml` Blueprint is included. **Before using the public service, set `FOE_ACCESS_KEY`** to a long random secret in Render → your service → Environment. The API fails closed until this is configured. Enter the same value in the Foe browser prompt. Do not commit the key or put it in source code. After pushing this repository, open [Render Blueprint](https://dashboard.render.com/blueprint/new?repo=https://github.com/kere0ne/Foe) and apply it. Set `OLLAMA_BASE_URL` to an Ollama API endpoint reachable from Render. `localhost:11434` on Render is not your personal computer. Free instance storage is ephemeral, so project files and SQLite data can be lost on restarts/redeploys. Do not publicly expose this prototype until authentication and production hardening are implemented.
 
 ## Current limitations
 
