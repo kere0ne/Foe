@@ -3,8 +3,9 @@ import asyncio, hashlib, json, os, re, secrets, shutil, sqlite3, subprocess, tim
 from pathlib import Path, PurePosixPath
 from typing import Any
 import httpx
+from urllib.parse import urlencode
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,13 @@ ROOT = Path(os.getenv('FOE_DATA_DIR', './data')).resolve()
 PROJECTS = ROOT / 'projects'
 ROOT.mkdir(parents=True, exist_ok=True); PROJECTS.mkdir(parents=True, exist_ok=True)
 DB = ROOT / 'foe.db'
+DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '').strip()
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '').strip()
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'https://foe-agent.onrender.com/api/auth/google/callback').strip()
+GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
 MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
 AI_PROVIDER = os.getenv('AI_PROVIDER', 'deepseek').strip().lower()
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '').strip()
@@ -90,7 +98,7 @@ app = FastAPI(title='Foe Agent API', version='0.2.0', description='AI software e
 @app.middleware('http')
 async def protect_api(request: Request, call_next):
     path=request.url.path
-    if path.startswith('/api/') and path not in {'/api/health','/api/auth/register','/api/auth/login'}:
+    if path.startswith('/api/') and path not in {'/api/health','/api/auth/google/start','/api/auth/google/callback'}:
         token=''
         authorization=request.headers.get('authorization','')
         if authorization.lower().startswith('bearer '):
@@ -118,17 +126,46 @@ async def protect_api(request: Request, call_next):
                 return JSONResponse(status_code=403,content={'detail':'This project belongs to another account.'})
     return await call_next(request)
 
-def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row
+class PgCompat:
+    """Small PostgreSQL adapter for Foe's existing parameterized SQL."""
+    def __init__(self, url: str):
+        import psycopg
+        from psycopg.rows import dict_row
+        self.raw=psycopg.connect(url, row_factory=dict_row)
+    def execute(self, sql, params=()):
+        if 'INSERT OR REPLACE INTO bot_owners(bot_id,owner_id) VALUES(?,?)' in sql:
+            sql='INSERT INTO bot_owners(bot_id,owner_id) VALUES(%s,%s) ON CONFLICT(bot_id) DO UPDATE SET owner_id=EXCLUDED.owner_id'
+        else:
+            sql=sql.replace('?','%s')
+        return self.raw.execute(sql,params)
+    def commit(self): return self.raw.commit()
+    def close(self): return self.raw.close()
+
+def db():
+    if DATABASE_URL:
+        con=PgCompat(DATABASE_URL)
+        con.execute("CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL, owner_id TEXT NOT NULL DEFAULT 'legacy')")
+        con.execute("CREATE TABLE IF NOT EXISTS bot_owners(bot_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL)")
+        con.execute("CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, plan TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', created_at DOUBLE PRECISION NOT NULL, updated_at DOUBLE PRECISION NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)")
+        con.execute("CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL DEFAULT '',google_sub TEXT UNIQUE,picture TEXT,created_at DOUBLE PRECISION NOT NULL)")
+        con.execute("CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at DOUBLE PRECISION NOT NULL,created_at DOUBLE PRECISION NOT NULL,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)")
+        con.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT 'legacy'")
+        con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT")
+        con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS picture TEXT")
+        con.commit()
+        return con
+    conn=sqlite3.connect(DB); conn.row_factory=sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     conn.executescript('''CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS bot_owners(bot_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, plan TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
-    CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,created_at REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL DEFAULT '',google_sub TEXT UNIQUE,picture TEXT,created_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at REAL NOT NULL,created_at REAL NOT NULL,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);''')
     cols={row['name'] for row in conn.execute('PRAGMA table_info(projects)').fetchall()}
-    if 'owner_id' not in cols:
-        conn.execute("ALTER TABLE projects ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'legacy'")
+    if 'owner_id' not in cols: conn.execute("ALTER TABLE projects ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'legacy'")
+    user_cols={row['name'] for row in conn.execute('PRAGMA table_info(users)').fetchall()}
+    if 'google_sub' not in user_cols: conn.execute('ALTER TABLE users ADD COLUMN google_sub TEXT')
+    if 'picture' not in user_cols: conn.execute('ALTER TABLE users ADD COLUMN picture TEXT')
     conn.commit()
     return conn
 
@@ -155,46 +192,70 @@ def create_session(conn, user_id: str) -> str:
     return token
 
 
-class AuthIn(BaseModel):
-    email: str = Field(min_length=5,max_length=254)
-    password: str = Field(min_length=8,max_length=256)
+@app.get('/api/auth/google/start')
+async def google_start():
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return RedirectResponse('/?auth_error=google_not_configured',status_code=303)
+    state=secrets.token_urlsafe(32)
+    params={'client_id':GOOGLE_CLIENT_ID,'redirect_uri':GOOGLE_REDIRECT_URI,'response_type':'code',
+            'scope':'openid email profile','state':state,'prompt':'select_account'}
+    response=RedirectResponse(GOOGLE_AUTH_URL+'?'+urlencode(params),status_code=302)
+    response.set_cookie('foe_google_state',state,max_age=600,httponly=True,secure=True,samesite='lax',path='/api/auth/google')
+    return response
 
-
-@app.post('/api/auth/register')
-def register(data: AuthIn):
-    email=data.email.strip().lower()
-    if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
-        raise HTTPException(400,'Enter a valid email address.')
+@app.get('/api/auth/google/callback')
+async def google_callback(request: Request, code: str = '', state: str = '', error: str = ''):
+    expected=request.cookies.get('foe_google_state','')
+    if error: return RedirectResponse('/?auth_error=google_cancelled',status_code=303)
+    if not code or not state or not expected or not secrets.compare_digest(state,expected):
+        return RedirectResponse('/?auth_error=google_state',status_code=303)
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return RedirectResponse('/?auth_error=google_not_configured',status_code=303)
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            token_response=await client.post(GOOGLE_TOKEN_URL,data={
+                'code':code,'client_id':GOOGLE_CLIENT_ID,'client_secret':GOOGLE_CLIENT_SECRET,
+                'redirect_uri':GOOGLE_REDIRECT_URI,'grant_type':'authorization_code'})
+            token_response.raise_for_status()
+            google_tokens=token_response.json()
+            profile_response=await client.get(GOOGLE_USERINFO_URL,
+                headers={'Authorization':'Bearer '+google_tokens['access_token']})
+            profile_response.raise_for_status()
+            profile=profile_response.json()
+    except Exception:
+        return RedirectResponse('/?auth_error=google_exchange',status_code=303)
+    email=str(profile.get('email','')).strip().lower()
+    subject=str(profile.get('sub','')).strip()
+    if not subject or not email or profile.get('email_verified') is not True:
+        return RedirectResponse('/?auth_error=google_unverified',status_code=303)
     con=db()
     try:
-        count=con.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
-        uid=uuid.uuid4().hex
-        con.execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',(uid,email,password_hash(data.password),time.time()))
-        if count==0: con.execute("UPDATE projects SET owner_id=? WHERE owner_id='legacy'",(uid,))
-        token=create_session(con,uid); con.commit()
-        return {'token':token,'user':{'id':uid,'email':email}}
-    except sqlite3.IntegrityError:
-        raise HTTPException(409,'An account with this email already exists. Sign in instead.')
-    finally: con.close()
-
-
-@app.post('/api/auth/login')
-def login(data: AuthIn):
-    email=data.email.strip().lower(); con=db()
-    try:
-        row=con.execute('SELECT id,email,password_hash FROM users WHERE email=?',(email,)).fetchone()
-        if not row or not password_matches(data.password,row['password_hash']):
-            raise HTTPException(401,'Email or password is incorrect.')
-        token=create_session(con,row['id']); con.commit()
-        return {'token':token,'user':{'id':row['id'],'email':row['email']}}
-    finally: con.close()
+        row=con.execute('SELECT id,email,google_sub FROM users WHERE google_sub=? OR email=?',(subject,email)).fetchone()
+        if row:
+            uid=row['id']
+            con.execute('UPDATE users SET google_sub=?,picture=? WHERE id=?',(subject,profile.get('picture'),uid))
+        else:
+            uid=uuid.uuid4().hex
+            con.execute('INSERT INTO users(id,email,password_hash,google_sub,picture,created_at) VALUES(?,?,?,?,?,?)',
+                (uid,email,'',subject,profile.get('picture'),time.time()))
+            count=con.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
+            if count==1: con.execute("UPDATE projects SET owner_id=? WHERE owner_id='legacy'",(uid,))
+        token=create_session(con,uid)
+        con.commit()
+    except Exception:
+        con.close()
+        return RedirectResponse('/?auth_error=google_account',status_code=303)
+    con.close()
+    response=RedirectResponse('/#foe_session='+token,status_code=303)
+    response.delete_cookie('foe_google_state',path='/api/auth/google')
+    return response
 
 
 @app.get('/api/auth/me')
 def auth_me(request: Request):
     uid=getattr(request.state,'user_id',None)
-    if not uid or uid=='legacy': raise HTTPException(401,'Please sign in with an account.')
-    con=db(); row=con.execute('SELECT id,email,created_at FROM users WHERE id=?',(uid,)).fetchone(); con.close()
+    if not uid or uid=='legacy': raise HTTPException(401,'Please sign in with Google.')
+    con=db(); row=con.execute('SELECT id,email,picture,created_at FROM users WHERE id=?',(uid,)).fetchone(); con.close()
     if not row: raise HTTPException(401,'Session is no longer valid.')
     return dict(row)
 
