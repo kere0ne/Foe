@@ -32,10 +32,10 @@ Then open http://localhost:8000. Ollama runs as a separate local container, and 
 
 By default, Compose downloads `qwen2.5-coder:7b` and creates `foe:latest` using `foe-model/Modelfile`; the app uses `foe:latest`. After editing the Modelfile, rerun `docker compose run --rm ollama-init` to rebuild the profile. To choose another base model, change the Modelfile's `FROM` line and `OLLAMA_BASE_MODEL` in `docker-compose.yml` to the same tag. The app model remains `foe:latest`.
 
-The default model is `qwen2.5-coder:7b`. To choose another Ollama model, create a `.env` file containing, for example:
+The default model selected by Foe is `foe:latest` (the customized Foe profile built from Qwen2.5-Coder). The base model `qwen2.5-coder:7b` is downloaded only to build that profile. To choose another Ollama model, create a `.env` file containing, for example:
 
 ```dotenv
-OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_MODEL=foe:latest
 FOE_PORT=8000
 ```
 
