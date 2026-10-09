@@ -11,9 +11,12 @@ services:
       - ollama
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+      OLLAMA_BASE_MODEL: qwen2.5-coder:7b
+      OLLAMA_MODEL: foe:latest
+    volumes:
+      - ./foe-model/Modelfile:/foe-model/Modelfile:ro
     entrypoint: ["/bin/sh", "-c"]
-    command: ["until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull \"$$OLLAMA_MODEL\""]
+    command: ["until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull \"$$OLLAMA_BASE_MODEL\" && ollama create \"$$OLLAMA_MODEL\" -f /foe-model/Modelfile"]
     restart: "no"
 
   app:
@@ -28,7 +31,7 @@ services:
       AI_PROVIDER: ollama
       AI_FALLBACK_PROVIDERS: ""
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-foe:latest}
       FOE_ALLOW_HOST_COMMANDS: "false"
     volumes:
       - foe_data:/data
