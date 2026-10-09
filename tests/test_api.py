@@ -7,7 +7,7 @@ _tmp = tempfile.TemporaryDirectory()
 os.environ["FOE_DATA_DIR"] = _tmp.name
 
 from fastapi.testclient import TestClient
-from app.main import app, db, create_session, provider_config, AGENT_TOOLS
+from app.main import app, db, create_session, provider_config, AGENT_TOOLS, ASSISTANT_SYSTEM
 import time, uuid
 
 client = TestClient(app)
@@ -87,3 +87,9 @@ def test_conversations_endpoints_and_isolation():
 def test_assistant_agent_without_provider_errors_cleanly():
     response = client.post('/api/assistant/agent', json={'prompt': 'hello'})
     assert response.status_code in (502, 503)
+
+
+def test_assistant_system_encourages_research_and_source_citations():
+    assert 'KNOWLEDGE AND RESEARCH' in ASSISTANT_SYSTEM
+    assert 'cite source URLs inline' in ASSISTANT_SYSTEM
+    assert 'never invent sources' in ASSISTANT_SYSTEM
