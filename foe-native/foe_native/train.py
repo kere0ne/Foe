@@ -32,6 +32,6 @@ def main():
   _,loss=model(x,y); opt.zero_grad(set_to_none=True); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(),1.0); opt.step(); step+=1
   if step==1 or step%25==0: print(f"step={step} loss={loss.item():.4f}")
   if step%a.save_every==0 or step==a.steps:
-   ck={"step":step,"model":model.state_dict(),"optimizer":opt.state_dict(),"config":model.config_dict(),"loss":float(loss.item())}; torch.save(ck,out/f"step-{step}.pt"); torch.save(ck,out/"latest.pt"); print(f"saved {out / chr(108)+chr(97)+chr(116)+chr(101)+chr(115)+chr(116)+chr(46)+chr(112)+chr(116)}")
+   ck={"step":step,"model":model.state_dict(),"optimizer":opt.state_dict(),"config":model.config_dict(),"loss":float(loss.item())}; torch.save(ck,out/f"step-{step}.pt"); torch.save(ck,out/"latest.pt"); print(f"saved checkpoint in {out}")
  print("Run complete. Evaluate on held-out data before deploying.")
 if __name__=="__main__": main()
