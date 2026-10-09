@@ -21,7 +21,10 @@ GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
 MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
-AI_PROVIDER = os.getenv('AI_PROVIDER', 'deepseek').strip().lower()
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'meta').strip().lower()
+MODEL_API_KEY = os.getenv('MODEL_API_KEY', '').strip()
+META_API_URL = os.getenv('META_API_BASE_URL', 'https://api.meta.ai/v1').rstrip('/')
+META_MODEL = os.getenv('META_MODEL', 'muse-spark-1.3').strip()
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '').strip()
 DEEPSEEK_URL = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com').rstrip('/')
 DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat').strip()
@@ -38,6 +41,7 @@ FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDER
 def provider_config(provider=None):
     p = (provider or AI_PROVIDER).lower()
     configs = {
+        'meta': {'url':META_API_URL,'key':MODEL_API_KEY,'model':META_MODEL,'openai':True},
         'deepseek': {'url':DEEPSEEK_URL,'key':DEEPSEEK_API_KEY,'model':DEEPSEEK_MODEL,'openai':True},
         'openrouter': {'url':OPENROUTER_URL,'key':OPENROUTER_API_KEY,'model':OPENROUTER_MODEL,'openai':True},
         'gemini': {'url':GEMINI_URL,'key':GEMINI_API_KEY,'model':GEMINI_MODEL,'openai':True},
@@ -53,6 +57,7 @@ def provider_order():
     for p in [AI_PROVIDER, *FALLBACK_PROVIDERS]:
         cfg=provider_config(p)
         if p in order or not cfg: continue
+        if p == 'meta' and not MODEL_API_KEY: continue
         if p == 'deepseek' and not DEEPSEEK_API_KEY: continue
         if p == 'openrouter' and not OPENROUTER_API_KEY: continue
         if p == 'gemini' and not GEMINI_API_KEY: continue
@@ -85,7 +90,7 @@ def unpack_model_message(payload, provider=None):
         choices=payload.get('choices') or []
         return choices[0].get('message',{}) if choices else {}
     return payload.get('message',{})
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', DEEPSEEK_MODEL if AI_PROVIDER == 'deepseek' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', META_MODEL if AI_PROVIDER == 'meta' else DEEPSEEK_MODEL if AI_PROVIDER == 'deepseek' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
@@ -308,7 +313,7 @@ def health():
 async def models():
     configured=provider_order()
     if not configured:
-        return {'provider':AI_PROVIDER,'connected':False,'default_model':DEFAULT_MODEL,'models':[],'fallbacks':[],'error':'No configured AI provider API key. Set DEEPSEEK_API_KEY and optionally OPENROUTER_API_KEY/GEMINI_API_KEY in Render Environment.'}
+        return {'provider':AI_PROVIDER,'connected':False,'default_model':DEFAULT_MODEL,'models':[],'fallbacks':[],'error':'No configured AI provider API key. Set MODEL_API_KEY for Meta Model API, and optionally provider fallback keys in Render Environment.'}
     statuses=[]
     async with httpx.AsyncClient(timeout=8) as client:
         for p in configured:
@@ -650,7 +655,7 @@ async def execute_agent_tool(pid: str, name: str, args: dict[str, Any], github_t
 @app.post('/api/projects/{pid}/agent')
 async def run_agent(pid: str, data: AgentIn, x_github_token: str | None = Header(default=None)):
     if not provider_order():
-        raise HTTPException(503,'No AI provider is configured. Add DEEPSEEK_API_KEY in Render Environment and optionally OPENROUTER_API_KEY or GEMINI_API_KEY for fallback.')
+        raise HTTPException(503,'No AI provider is configured. Add MODEL_API_KEY for Meta Model API and optionally provider fallback keys in Render Environment.')
     base=project_path(pid)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
         try:
