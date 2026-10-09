@@ -38,7 +38,7 @@ OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'foe:latest').strip()
 FOE_MODEL_URL = os.getenv('FOE_MODEL_BASE_URL', 'http://localhost:8080/v1').strip().rstrip('/')
 FOE_MODEL_NAME = os.getenv('FOE_MODEL_NAME', 'foe').strip()
 FOE_MODEL_API_KEY = os.getenv('FOE_MODEL_API_KEY', '').strip()
-FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDERS', '').split(',') if p.strip()]
+FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDERS', 'openrouter,gemini').split(',') if p.strip()]
 def provider_config(provider=None):
     p = (provider or AI_PROVIDER).lower()
     configs = {
@@ -63,6 +63,9 @@ def provider_order():
         if p == 'gemini' and not GEMINI_API_KEY: continue
         if p == 'ollama' and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY: continue
         if p == 'foe' and FOE_MODEL_URL.startswith('https://') and not FOE_MODEL_API_KEY: continue
+        # A localhost model URL cannot reach the developer's machine from a hosted Render service.
+        if p == 'foe' and os.getenv('RENDER') and ('localhost' in FOE_MODEL_URL or '127.0.0.1' in FOE_MODEL_URL): continue
+        if p == 'ollama' and os.getenv('RENDER') and ('localhost' in OLLAMA_URL or '127.0.0.1' in OLLAMA_URL): continue
         order.append(p)
     return order
 def model_headers(provider=None):
@@ -937,7 +940,7 @@ async def agent_loop(client: httpx.AsyncClient, messages: list, model: str, max_
 @app.post('/api/projects/{pid}/agent')
 async def run_agent(pid: str, data: AgentIn, request: Request, x_github_token: str | None = Header(default=None)):
     if not provider_order():
-        raise HTTPException(503,'No AI runtime is reachable. Start Ollama locally (recommended) or configure a hosted model endpoint and credentials.')
+        raise HTTPException(503,'No configured AI provider is available. For the hosted Foe website, add a valid GEMINI_API_KEY or OPENROUTER_API_KEY in Render Environment, or deploy the Foe model server and set FOE_MODEL_BASE_URL to its reachable URL. Localhost model URLs do not work from Render.')
     base=project_path(pid)
     async with httpx.AsyncClient(timeout=httpx.Timeout(180,connect=5)) as client:
         try:
