@@ -66,6 +66,7 @@ def db() -> sqlite3.Connection:
     cols={row['name'] for row in conn.execute('PRAGMA table_info(projects)').fetchall()}
     if 'owner_id' not in cols:
         conn.execute("ALTER TABLE projects ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'legacy'")
+    conn.commit()
     return conn
 
 
@@ -99,7 +100,7 @@ class AuthIn(BaseModel):
 @app.post('/api/auth/register')
 def register(data: AuthIn):
     email=data.email.strip().lower()
-    if not re.fullmatch(r'[^\\s@]+@[^\\s@]+\\.[^\\s@]+',email):
+    if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
         raise HTTPException(400,'Enter a valid email address.')
     con=db()
     try:
