@@ -14,9 +14,15 @@ services:
         value: "false"
       - key: FOE_ACCESS_KEY
         sync: false
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: OLLAMA_MODEL
+        value: gemini-3.8-flash
+      - key: GEMINI_API_KEY
+        sync: false
       - key: OLLAMA_BASE_URL
         sync: false
-      - key: OLLAMA_MODEL
-        value: qwen3-coder:480b-cloud
       - key: OLLAMA_API_KEY
         sync: false
