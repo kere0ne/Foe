@@ -13,36 +13,71 @@ PROJECTS = ROOT / 'projects'
 ROOT.mkdir(parents=True, exist_ok=True); PROJECTS.mkdir(parents=True, exist_ok=True)
 DB = ROOT / 'foe.db'
 MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
-AI_PROVIDER = os.getenv('AI_PROVIDER', 'ollama').strip().lower()
-OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
-OLLAMA_API_KEY = os.getenv('OLLAMA_API_KEY', '').strip()
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'deepseek').strip().lower()
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '').strip()
+DEEPSEEK_URL = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com').rstrip('/')
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat').strip()
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
+OPENROUTER_URL = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
+OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'openrouter/free').strip()
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
 GEMINI_URL = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta/openai').rstrip('/')
-def is_gemini(): return AI_PROVIDER == 'gemini'
-def ollama_headers():
-    return {'Authorization': f'Bearer {OLLAMA_API_KEY}'} if OLLAMA_API_KEY else {}
-def model_headers():
-    key = GEMINI_API_KEY if is_gemini() else OLLAMA_API_KEY
-    return {'Authorization': f'Bearer {key}'} if key else {}
-def model_url():
-    return GEMINI_URL if is_gemini() else OLLAMA_URL
-def chat_endpoint():
-    return f'{model_url()}/chat/completions' if is_gemini() else f'{model_url()}/api/chat'
-def model_payload(messages, model, stream=False, temperature=0.2, tools=None):
-    payload={'model':model,'messages':messages,'stream':stream}
-    if is_gemini():
-        # Gemini 3 models no longer accept legacy sampling parameters such as temperature.
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash').strip()
+OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
+OLLAMA_API_KEY = os.getenv('OLLAMA_API_KEY', '').strip()
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b').strip()
+FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDERS', 'openrouter,gemini').split(',') if p.strip()]
+def provider_config(provider=None):
+    p = (provider or AI_PROVIDER).lower()
+    configs = {
+        'deepseek': {'url':DEEPSEEK_URL,'key':DEEPSEEK_API_KEY,'model':DEEPSEEK_MODEL,'openai':True},
+        'openrouter': {'url':OPENROUTER_URL,'key':OPENROUTER_API_KEY,'model':OPENROUTER_MODEL,'openai':True},
+        'gemini': {'url':GEMINI_URL,'key':GEMINI_API_KEY,'model':GEMINI_MODEL,'openai':True},
+        'ollama': {'url':OLLAMA_URL,'key':OLLAMA_API_KEY,'model':OLLAMA_MODEL,'openai':False},
+    }
+    return configs.get(p)
+def is_gemini(provider=None): return (provider or AI_PROVIDER) == 'gemini'
+def is_openai_compatible(provider=None):
+    cfg=provider_config(provider)
+    return bool(cfg and cfg['openai'])
+def provider_order():
+    order=[]
+    for p in [AI_PROVIDER, *FALLBACK_PROVIDERS]:
+        cfg=provider_config(p)
+        if p in order or not cfg: continue
+        if p == 'deepseek' and not DEEPSEEK_API_KEY: continue
+        if p == 'openrouter' and not OPENROUTER_API_KEY: continue
+        if p == 'gemini' and not GEMINI_API_KEY: continue
+        if p == 'ollama' and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY: continue
+        order.append(p)
+    return order
+def model_headers(provider=None):
+    cfg=provider_config(provider)
+    return {'Authorization': f"Bearer {cfg['key']}"} if cfg and cfg['key'] else {}
+def model_url(provider=None):
+    cfg=provider_config(provider)
+    return cfg['url'] if cfg else OLLAMA_URL
+def chat_endpoint(provider=None):
+    return f"{model_url(provider)}/chat/completions" if is_openai_compatible(provider) else f"{model_url(provider)}/api/chat"
+def model_payload(messages, model, stream=False, temperature=0.2, tools=None, provider=None):
+    p=provider or AI_PROVIDER
+    cfg=provider_config(p) or provider_config('ollama')
+    chosen_model=model or cfg['model']
+    if p != AI_PROVIDER and model == DEFAULT_MODEL: chosen_model=cfg['model']
+    payload={'model':chosen_model,'messages':messages,'stream':stream}
+    if is_openai_compatible(p):
+        if p != 'gemini': payload['temperature']=temperature
         if tools: payload['tools']=tools
     else:
         payload['options']={'temperature':temperature}
         if tools: payload['tools']=tools
     return payload
-def unpack_model_message(payload):
-    if is_gemini():
+def unpack_model_message(payload, provider=None):
+    if is_openai_compatible(provider):
         choices=payload.get('choices') or []
         return choices[0].get('message',{}) if choices else {}
     return payload.get('message',{})
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemini-2.5-flash' if AI_PROVIDER == 'gemini' else 'qwen2.5-coder:7b')
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', DEEPSEEK_MODEL if AI_PROVIDER == 'deepseek' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
@@ -206,20 +241,25 @@ def health():
 
 @app.get('/api/models')
 async def models():
-    if is_gemini() and not GEMINI_API_KEY:
-        return {'provider':'gemini','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':'Set GEMINI_API_KEY in Render Environment. Create a key at https://aistudio.google.com/apikey.'}
-    if not is_gemini() and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
-        return {'provider':'ollama-cloud','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':'Set OLLAMA_API_KEY in Render Environment. Create a key at https://ollama.com/settings/keys.'}
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            if is_gemini():
-                r=await client.get(f'{GEMINI_URL}/models',headers=model_headers()); r.raise_for_status(); payload=r.json()
-                names=[m.get('id') for m in payload.get('data',[]) if m.get('id')]
-                return {'provider':'gemini','connected':True,'default_model':DEFAULT_MODEL,'models':names}
-            r=await client.get(f'{OLLAMA_URL}/api/tags', headers=model_headers()); r.raise_for_status(); payload=r.json()
-        return {'provider':'ollama','connected':True,'default_model':DEFAULT_MODEL,'models':[m.get('name') for m in payload.get('models',[])]}
-    except Exception as e:
-        return {'provider':'gemini' if is_gemini() else 'ollama','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':f'Cannot reach or authenticate with model provider: {type(e).__name__}'}
+    configured=provider_order()
+    if not configured:
+        return {'provider':AI_PROVIDER,'connected':False,'default_model':DEFAULT_MODEL,'models':[],'fallbacks':[],'error':'No configured AI provider API key. Set DEEPSEEK_API_KEY and optionally OPENROUTER_API_KEY/GEMINI_API_KEY in Render Environment.'}
+    statuses=[]
+    async with httpx.AsyncClient(timeout=8) as client:
+        for p in configured:
+            try:
+                if is_openai_compatible(p):
+                    r=await client.get(f"{model_url(p)}/models",headers=model_headers(p)); r.raise_for_status()
+                    names=[m.get('id') for m in r.json().get('data',[]) if m.get('id')]
+                else:
+                    r=await client.get(f"{model_url(p)}/api/tags",headers=model_headers(p)); r.raise_for_status()
+                    names=[m.get('name') for m in r.json().get('models',[]) if m.get('name')]
+                statuses.append({'provider':p,'connected':True,'models':names})
+            except Exception as e:
+                statuses.append({'provider':p,'connected':False,'models':[],'error':type(e).__name__})
+    primary=next((s for s in statuses if s['provider']==AI_PROVIDER),None)
+    good=next((s for s in statuses if s['connected']),None)
+    return {'provider':AI_PROVIDER,'connected':bool(good),'default_model':DEFAULT_MODEL,'models':(primary or good or {}).get('models',[]),'fallbacks':statuses,'active_provider':good['provider'] if good else None,'error':None if good else 'All configured AI providers are unavailable. Check keys, quota and provider status.'}
 
 @app.post('/api/projects')
 def create_project(data: ProjectIn, request: Request):
@@ -289,21 +329,29 @@ async def upload(pid: str, file: UploadFile = File(...)):
 
 @app.post('/api/chat')
 async def chat(data: ChatIn):
-    if is_gemini() and not GEMINI_API_KEY:
-        raise HTTPException(503,'Gemini is selected but GEMINI_API_KEY is missing. Create a key at https://aistudio.google.com/apikey and add it in Render → Environment.')
-    if not is_gemini() and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
-        raise HTTPException(503,'Ollama Cloud is selected but OLLAMA_API_KEY is missing. Create a key at https://ollama.com/settings/keys and add it in Render → Environment.')
     if not data.messages or any(m.get('role') not in {'system','user','assistant'} or not isinstance(m.get('content'),str) for m in data.messages):
         raise HTTPException(400,'Messages must contain valid roles and text content')
     async def stream():
+        failures=[]
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
-                async with client.stream('POST', chat_endpoint(), headers=model_headers(), json=model_payload(data.messages,data.model or DEFAULT_MODEL,True,data.temperature)) as response:
-                    if response.status_code >= 400:
-                        body=(await response.aread()).decode('utf-8', errors='replace')
-                        yield 'data: ' + json.dumps({'error':f'AI provider returned HTTP {response.status_code}: {body[:500]}'}) + '\n\n'
-                        return
-                    if is_gemini():
+                selected=None
+                for provider in provider_order():
+                    try:
+                        cm=client.stream('POST',chat_endpoint(provider),headers=model_headers(provider),json=model_payload(data.messages,data.model or DEFAULT_MODEL,True,data.temperature,provider=provider))
+                        response=await cm.__aenter__()
+                        if response.status_code < 400:
+                            selected=(provider,cm,response); break
+                        body=(await response.aread()).decode('utf-8',errors='replace')
+                        failures.append(f"{provider} HTTP {response.status_code}: {body[:180]}")
+                        await cm.__aexit__(None,None,None)
+                    except Exception as e:
+                        failures.append(f"{provider}: {type(e).__name__}")
+                if not selected:
+                    yield 'data: '+json.dumps({'error':'All AI providers failed. '+' | '.join(failures)})+'\n\n'; return
+                provider,cm,response=selected
+                try:
+                    if is_openai_compatible(provider):
                         async for line in response.aiter_lines():
                             if not line.startswith('data:'): continue
                             raw=line[5:].strip()
@@ -318,10 +366,11 @@ async def chat(data: ChatIn):
                         async for line in response.aiter_lines():
                             if line: yield f'data: {line}\n\n'
                     yield 'data: [DONE]\n\n'
+                finally:
+                    await cm.__aexit__(None,None,None)
         except Exception as e:
-            yield 'data: ' + json.dumps({'error':f'AI provider unavailable at {model_url()}: {type(e).__name__}. Check provider configuration and API key.'}) + '\n\n'
+            yield 'data: '+json.dumps({'error':f'AI providers unavailable: {type(e).__name__}. Check API keys, quota, and endpoints.'})+'\n\n'
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
-
 
 
 def github_headers(token: str | None):
@@ -438,11 +487,15 @@ AGENT_TOOLS = [
  {'type':'function','function':{'name':'read_file','description':'Read a UTF-8 text file from the project.','parameters':{'type':'object','properties':{'path':{'type':'string'}},'required':['path']}}},
  {'type':'function','function':{'name':'write_file','description':'Create or replace a UTF-8 project file. Only write files necessary for the user request.','parameters':{'type':'object','properties':{'path':{'type':'string'},'content':{'type':'string'}},'required':['path','content']}}},
  {'type':'function','function':{'name':'search_files','description':'Search text in project text files.','parameters':{'type':'object','properties':{'query':{'type':'string'}},'required':['query']}}},
- {'type':'function','function':{'name':'run_check','description':'Run a safe, pre-approved test or syntax-check command in the isolated Docker sandbox. Allowed commands: pytest -q, python -m pytest -q, python -m compileall ., node --test, npm test, npm run build, npm run lint, ruff check ., go test ./..., cargo test, git diff --check, git status --short.','parameters':{'type':'object','properties':{'command':{'type':'string'}},'required':['command']}}}
+ {'type':'function','function':{'name':'run_check','description':'Run a safe, pre-approved test or syntax-check command in the isolated Docker sandbox. Allowed commands: pytest -q, python -m pytest -q, python -m compileall ., node --test, npm test, npm run build, npm run lint, ruff check ., go test ./..., cargo test, git diff --check, git status --short.','parameters':{'type':'object','properties':{'command':{'type':'string'}},'required':['command']}}},
+ {'type':'function','function':{'name':'github_list_repositories','description':'List repositories accessible to the connected GitHub token. Use only when the user asks about their GitHub repositories.','parameters':{'type':'object','properties':{},'required':[]}}},
+ {'type':'function','function':{'name':'github_list_files','description':'List tracked file paths in a repository. Arguments: owner, repo.','parameters':{'type':'object','properties':{'owner':{'type':'string'},'repo':{'type':'string'}},'required':['owner','repo']}}},
+ {'type':'function','function':{'name':'github_read_file','description':'Read a UTF-8 text file from a repository. Arguments: owner, repo, path.','parameters':{'type':'object','properties':{'owner':{'type':'string'},'repo':{'type':'string'},'path':{'type':'string'}},'required':['owner','repo','path']}}},
+ {'type':'function','function':{'name':'github_write_file','description':'Commit a file change to a repository the user connected. Only do this when the user explicitly requests GitHub edits or asks you to implement a change in that repository. Arguments: owner, repo, path, content, message.','parameters':{'type':'object','properties':{'owner':{'type':'string'},'repo':{'type':'string'},'path':{'type':'string'},'content':{'type':'string'},'message':{'type':'string'}},'required':['owner','repo','path','content']}}}
 ]
 ALLOWED_AGENT_CHECKS = {'pytest -q','python -m pytest -q','python -m compileall .','node --test','npm test','npm run build','npm run lint','ruff check .','go test ./...','cargo test','git diff --check','git status --short'}
 
-async def execute_agent_tool(pid: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
+async def execute_agent_tool(pid: str, name: str, args: dict[str, Any], github_token: str | None = None) -> dict[str, Any]:
     base=project_path(pid)
     if name == 'list_files':
         items=[]
@@ -475,6 +528,46 @@ async def execute_agent_tool(pid: str, name: str, args: dict[str, Any]) -> dict[
                     if len(hits)>=100: return {'matches':hits}
             except (UnicodeDecodeError,OSError): continue
         return {'matches':hits}
+    if name.startswith('github_'):
+        if not github_token: return {'error':'Connect GitHub first using the GitHub button. The token is sent only to the Foe backend for this request.'}
+        headers=github_headers(github_token)
+        owner=str(args.get('owner','')).strip(); repo=str(args.get('repo','')).strip()
+        if name=='github_list_repositories':
+            async with httpx.AsyncClient(timeout=20) as client:
+                r=await client.get(f'{GITHUB_API}/user/repos',headers=headers,params={'sort':'updated','per_page':100,'affiliation':'owner,collaborator,organization_member'})
+            if r.status_code>=400: return {'error':f'GitHub API HTTP {r.status_code}'}
+            return {'repositories':[{'full_name':x['full_name'],'private':x['private'],'default_branch':x['default_branch'],'html_url':x['html_url']} for x in r.json()]}
+        if not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',owner) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',repo):
+            return {'error':'Invalid owner or repository name'}
+        async with httpx.AsyncClient(timeout=25) as client:
+            if name=='github_list_files':
+                r=await client.get(f'{GITHUB_API}/repos/{owner}/{repo}/git/trees/HEAD',headers=headers,params={'recursive':'1'})
+                if r.status_code>=400: return {'error':f'GitHub tree request failed with HTTP {r.status_code}'}
+                return {'files':[{'path':x['path'],'size':x.get('size')} for x in r.json().get('tree',[]) if x.get('type')=='blob'][:1500]}
+            path=str(args.get('path','')).strip().lstrip('/')
+            if not path or '..' in PurePosixPath(path).parts: return {'error':'Invalid repository file path'}
+            endpoint=f'{GITHUB_API}/repos/{owner}/{repo}/contents/{path}'
+            if name=='github_read_file':
+                r=await client.get(endpoint,headers=headers)
+                if r.status_code>=400: return {'error':f'GitHub file read failed with HTTP {r.status_code}'}
+                obj=r.json()
+                if obj.get('type')!='file' or obj.get('size',0)>500000: return {'error':'Only UTF-8 text files up to 500 KB can be read'}
+                import base64
+                try: content=base64.b64decode(obj.get('content','')).decode('utf-8')
+                except Exception: return {'error':'File is not UTF-8 text'}
+                return {'path':path,'content':content,'sha':obj.get('sha')}
+            if name=='github_write_file':
+                content=args.get('content')
+                if not isinstance(content,str) or len(content.encode())>500000: return {'error':'File content must be text up to 500 KB'}
+                get=await client.get(endpoint,headers=headers)
+                payload={'message':str(args.get('message') or 'Update from Foe Agent'),'content':__import__('base64').b64encode(content.encode()).decode()}
+                if get.status_code==200: payload['sha']=get.json().get('sha')
+                elif get.status_code!=404: return {'error':f'Cannot check current file: HTTP {get.status_code}'}
+                r=await client.put(endpoint,headers=headers,json=payload)
+                if r.status_code>=400: return {'error':f'GitHub commit failed with HTTP {r.status_code}; check Contents write permission'}
+                obj=r.json()
+                return {'saved':True,'path':path,'commit':obj.get('commit',{}).get('sha'),'url':obj.get('content',{}).get('html_url')}
+        return {'error':'Unknown GitHub tool'}
     if name == 'run_check':
         command=str(args.get('command','')).strip()
         if command not in ALLOWED_AGENT_CHECKS: return {'error':'Command is not in the safe check allowlist','allowed':sorted(ALLOWED_AGENT_CHECKS)}
@@ -490,19 +583,13 @@ async def execute_agent_tool(pid: str, name: str, args: dict[str, Any]) -> dict[
     return {'error':f'Unknown tool: {name}'}
 
 @app.post('/api/projects/{pid}/agent')
-async def run_agent(pid: str, data: AgentIn):
-    if is_gemini() and not GEMINI_API_KEY:
-        raise HTTPException(503,'Gemini is selected but GEMINI_API_KEY is missing. Create a key at https://aistudio.google.com/apikey and add it in Render → Environment.')
-    if not is_gemini() and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
-        raise HTTPException(503,'Ollama Cloud is selected but OLLAMA_API_KEY is missing. Create a key at https://ollama.com/settings/keys and add it in Render → Environment.')
+async def run_agent(pid: str, data: AgentIn, x_github_token: str | None = Header(default=None)):
+    if not provider_order():
+        raise HTTPException(503,'No AI provider is configured. Add DEEPSEEK_API_KEY in Render Environment and optionally OPENROUTER_API_KEY or GEMINI_API_KEY for fallback.')
     base=project_path(pid)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
         try:
             model=data.model or DEFAULT_MODEL
-            if not is_gemini():
-                tags=await client.get(f'{OLLAMA_URL}/api/tags',headers=model_headers()); tags.raise_for_status()
-                available=[m.get('name') for m in tags.json().get('models',[])]
-                if available and model not in available: raise HTTPException(400,f'Model {model} is not installed on the configured provider.')
             rows=[]
             for p in base.rglob('*'):
                 if p.is_file() and not any(x in {'.git','node_modules','.venv','__pycache__'} for x in p.parts):
@@ -512,13 +599,21 @@ async def run_agent(pid: str, data: AgentIn):
                 {'role':'system','content':'You are Foe, a software engineering agent working inside one user-selected project. Use tools to inspect files before changing code, make focused edits, and run tests when possible. Do not claim a test passed unless the tool output confirms it. Never attempt secrets extraction, destructive disk operations, or network exfiltration. Tool execution is limited to this project and approved checks. If you are done, respond with a concise summary and list files changed and test results. Current project file list:\n'+context},
                 {'role':'user','content':data.prompt}
             ]
-            steps=[]; final=''
+            steps=[]; final=''; active_provider=None; provider_failures=[]
             for _ in range(data.max_steps):
-                r=await client.post(chat_endpoint(),headers=model_headers(),json=model_payload(messages,model,False,0.1,AGENT_TOOLS))
-                if r.status_code>=400: raise HTTPException(502,'Model provider error: '+r.text[:400])
-                msg=unpack_model_message(r.json())
+                r=None
+                for candidate in provider_order():
+                    try:
+                        attempt=await client.post(chat_endpoint(candidate),headers=model_headers(candidate),json=model_payload(messages,model,False,0.1,AGENT_TOOLS,provider=candidate))
+                        if attempt.status_code<400:
+                            r=attempt; active_provider=candidate; break
+                        provider_failures.append(f'{candidate} HTTP {attempt.status_code}')
+                    except Exception as err:
+                        provider_failures.append(f'{candidate} {type(err).__name__}')
+                if r is None: raise HTTPException(502,'All AI providers failed: '+'; '.join(provider_failures[-6:]))
+                msg=unpack_model_message(r.json(),active_provider)
                 calls=msg.get('tool_calls') or []
-                if is_gemini():
+                if is_openai_compatible(active_provider):
                     messages.append({'role':'assistant','content':msg.get('content') or '', 'tool_calls':calls} if calls else {'role':'assistant','content':msg.get('content') or ''})
                 else:
                     messages.append({'role':'assistant','content':msg.get('content',''),'tool_calls':calls})
@@ -531,16 +626,16 @@ async def run_agent(pid: str, data: AgentIn):
                         try: args=json.loads(args)
                         except json.JSONDecodeError: args={}
                     if not isinstance(args,dict): args={}
-                    result=await execute_agent_tool(pid,name,args)
+                    result=await execute_agent_tool(pid,name,args,x_github_token)
                     steps.append({'tool':name,'arguments':{k:v for k,v in args.items() if k!='content'},'result':result})
-                    if is_gemini(): messages.append({'role':'tool','tool_call_id':call.get('id',''),'content':json.dumps(result,ensure_ascii=False)[:16000]})
+                    if is_openai_compatible(active_provider): messages.append({'role':'tool','tool_call_id':call.get('id',''),'content':json.dumps(result,ensure_ascii=False)[:16000]})
                     else: messages.append({'role':'tool','tool_name':name,'content':json.dumps(result,ensure_ascii=False)[:16000]})
             if not final:
-                r=await client.post(chat_endpoint(),headers=model_headers(),json=model_payload(messages,model,False,0.1))
-                r.raise_for_status(); final=unpack_model_message(r.json()).get('content','Agent stopped after reaching the tool-step limit.')
-            return {'ok':True,'model':model,'response':final,'steps':steps,'step_limit':data.max_steps}
+                r=await client.post(chat_endpoint(active_provider),headers=model_headers(active_provider),json=model_payload(messages,model,False,0.1,provider=active_provider))
+                r.raise_for_status(); final=unpack_model_message(r.json(),active_provider).get('content','Agent stopped after reaching the tool-step limit.')
+            return {'ok':True,'provider':active_provider or AI_PROVIDER,'model':model,'response':final,'steps':steps,'step_limit':data.max_steps}
         except HTTPException: raise
-        except httpx.ConnectError: raise HTTPException(503,f'Cannot reach {"Gemini" if is_gemini() else "Ollama"} model provider. Check its endpoint and API key.')
+        except httpx.ConnectError: raise HTTPException(503,'Cannot reach any configured AI provider. Check endpoints, API keys, and quota.')
         except Exception as e: raise HTTPException(502,f'Agent run failed: {type(e).__name__}: {str(e)[:250]}')
 
 @app.post('/api/projects/{pid}/tasks')
