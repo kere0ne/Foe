@@ -35,6 +35,9 @@ GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash').strip()
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
 OLLAMA_API_KEY = os.getenv('OLLAMA_API_KEY', '').strip()
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b').strip()
+FOE_NATIVE_URL = os.getenv('FOE_NATIVE_BASE_URL', 'http://127.0.0.1:8090/v1').rstrip('/')
+FOE_NATIVE_API_KEY = os.getenv('FOE_NATIVE_API_KEY', '').strip()
+FOE_NATIVE_MODEL = os.getenv('FOE_NATIVE_MODEL', 'foe-native').strip()
 FALLBACK_PROVIDERS = [p.strip().lower() for p in os.getenv('AI_FALLBACK_PROVIDERS', 'openrouter,gemini').split(',') if p.strip()]
 def provider_config(provider=None):
     p = (provider or AI_PROVIDER).lower()
@@ -43,6 +46,7 @@ def provider_config(provider=None):
         'openrouter': {'url':OPENROUTER_URL,'key':OPENROUTER_API_KEY,'model':OPENROUTER_MODEL,'openai':True},
         'gemini': {'url':GEMINI_URL,'key':GEMINI_API_KEY,'model':GEMINI_MODEL,'openai':True},
         'ollama': {'url':OLLAMA_URL,'key':OLLAMA_API_KEY,'model':OLLAMA_MODEL,'openai':False},
+        'foe': {'url':FOE_NATIVE_URL,'key':FOE_NATIVE_API_KEY,'model':FOE_NATIVE_MODEL,'openai':True},
     }
     return configs.get(p)
 def is_gemini(provider=None): return (provider or AI_PROVIDER) == 'gemini'
@@ -86,7 +90,7 @@ def unpack_model_message(payload, provider=None):
         choices=payload.get('choices') or []
         return choices[0].get('message',{}) if choices else {}
     return payload.get('message',{})
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', META_MODEL if AI_PROVIDER == 'meta' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', FOE_NATIVE_MODEL if AI_PROVIDER == 'foe' else META_MODEL if AI_PROVIDER == 'meta' else OPENROUTER_MODEL if AI_PROVIDER == 'openrouter' else GEMINI_MODEL if AI_PROVIDER == 'gemini' else OLLAMA_MODEL)
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
