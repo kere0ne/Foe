@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio, json, os, re, shutil, sqlite3, subprocess, time, uuid, zipfile
+import asyncio, hashlib, json, os, re, secrets, shutil, sqlite3, subprocess, time, uuid, zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 import httpx
@@ -27,23 +27,126 @@ app = FastAPI(title='Foe Agent API', version='0.2.0', description='AI software e
 
 @app.middleware('http')
 async def protect_api(request: Request, call_next):
-    # Protect project/file mutation, agent execution, terminal and model endpoints on public hosting.
-    if request.url.path.startswith('/api/') and request.url.path != '/api/health':
-        if not FOE_ACCESS_KEY:
-            return JSONResponse(status_code=503, content={'detail':'Foe is locked until FOE_ACCESS_KEY is configured in the Render environment variables.'})
-        import hmac
-        supplied = request.headers.get('x-foe-access', '')
-        if not hmac.compare_digest(supplied, FOE_ACCESS_KEY):
-            return JSONResponse(status_code=401, content={'detail':'Foe access key required or invalid.'})
+    path=request.url.path
+    if path.startswith('/api/') and path not in {'/api/health','/api/auth/register','/api/auth/login'}:
+        token=''
+        authorization=request.headers.get('authorization','')
+        if authorization.lower().startswith('bearer '):
+            token=authorization[7:].strip()
+        user_id=None
+        if token:
+            digest=hashlib.sha256(token.encode()).hexdigest()
+            con=db()
+            row=con.execute('SELECT user_id FROM sessions WHERE token_hash=? AND expires_at>?',(digest,time.time())).fetchone()
+            con.close()
+            if row: user_id=row['user_id']
+        if not user_id and FOE_ACCESS_KEY and request.headers.get('x-foe-access','') == FOE_ACCESS_KEY:
+            user_id='legacy'
+        if not user_id:
+            return JSONResponse(status_code=401,content={'detail':'Sign in to your Foe account to continue.'})
+        request.state.user_id=user_id
+        parts=path.split('/')
+        if len(parts)>3 and parts[1:3]==['api','projects']:
+            pid=parts[3]
+            con=db()
+            row=con.execute('SELECT owner_id FROM projects WHERE id=?',(pid,)).fetchone()
+            con.close()
+            if not row: return JSONResponse(status_code=404,content={'detail':'Project not found'})
+            if row['owner_id'] != user_id:
+                return JSONResponse(status_code=403,content={'detail':'This project belongs to another account.'})
     return await call_next(request)
-
 
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     conn.executescript('''CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at REAL NOT NULL);
-    CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, plan TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);''')
+    CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, plan TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
+    CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,created_at REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at REAL NOT NULL,created_at REAL NOT NULL,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);''')
+    cols={row['name'] for row in conn.execute('PRAGMA table_info(projects)').fetchall()}
+    if 'owner_id' not in cols:
+        conn.execute("ALTER TABLE projects ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'legacy'")
     return conn
+
+
+def password_hash(password: str) -> str:
+    salt=secrets.token_bytes(16)
+    derived=hashlib.pbkdf2_hmac('sha256',password.encode(),salt,310000)
+    return salt.hex()+':'+derived.hex()
+
+
+def password_matches(password: str, stored: str) -> bool:
+    try:
+        salt_hex,expected=stored.split(':',1)
+        actual=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt_hex),310000).hex()
+        import hmac
+        return hmac.compare_digest(actual,expected)
+    except Exception: return False
+
+
+def create_session(conn, user_id: str) -> str:
+    token=secrets.token_urlsafe(40); now=time.time()
+    conn.execute('INSERT INTO sessions(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)',
+        (hashlib.sha256(token.encode()).hexdigest(),user_id,now+60*60*24*30,now))
+    return token
+
+
+class AuthIn(BaseModel):
+    email: str = Field(min_length=5,max_length=254)
+    password: str = Field(min_length=8,max_length=256)
+
+
+@app.post('/api/auth/register')
+def register(data: AuthIn):
+    email=data.email.strip().lower()
+    if not re.fullmatch(r'[^\\s@]+@[^\\s@]+\\.[^\\s@]+',email):
+        raise HTTPException(400,'Enter a valid email address.')
+    con=db()
+    try:
+        count=con.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
+        uid=uuid.uuid4().hex
+        con.execute('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)',(uid,email,password_hash(data.password),time.time()))
+        if count==0: con.execute("UPDATE projects SET owner_id=? WHERE owner_id='legacy'",(uid,))
+        token=create_session(con,uid); con.commit()
+        return {'token':token,'user':{'id':uid,'email':email}}
+    except sqlite3.IntegrityError:
+        raise HTTPException(409,'An account with this email already exists. Sign in instead.')
+    finally: con.close()
+
+
+@app.post('/api/auth/login')
+def login(data: AuthIn):
+    email=data.email.strip().lower(); con=db()
+    try:
+        row=con.execute('SELECT id,email,password_hash FROM users WHERE email=?',(email,)).fetchone()
+        if not row or not password_matches(data.password,row['password_hash']):
+            raise HTTPException(401,'Email or password is incorrect.')
+        token=create_session(con,row['id']); con.commit()
+        return {'token':token,'user':{'id':row['id'],'email':row['email']}}
+    finally: con.close()
+
+
+@app.get('/api/auth/me')
+def auth_me(request: Request):
+    uid=getattr(request.state,'user_id',None)
+    if not uid or uid=='legacy': raise HTTPException(401,'Please sign in with an account.')
+    con=db(); row=con.execute('SELECT id,email,created_at FROM users WHERE id=?',(uid,)).fetchone(); con.close()
+    if not row: raise HTTPException(401,'Session is no longer valid.')
+    return dict(row)
+
+
+@app.post('/api/auth/logout')
+def auth_logout(authorization: str | None = Header(default=None)):
+    if authorization and authorization.lower().startswith('bearer '):
+        digest=hashlib.sha256(authorization[7:].strip().encode()).hexdigest()
+        con=db(); con.execute('DELETE FROM sessions WHERE token_hash=?',(digest,)); con.commit(); con.close()
+    return {'ok':True}
+
+
+def require_project_owner(pid: str, user_id: str):
+    con=db(); row=con.execute('SELECT owner_id FROM projects WHERE id=?',(pid,)).fetchone(); con.close()
+    if not row: raise HTTPException(404,'Project not found')
+    if row['owner_id'] != user_id: raise HTTPException(403,'This project belongs to another account.')
 
 
 def project_path(project_id: str) -> Path:
@@ -73,7 +176,7 @@ class GithubFileIn(BaseModel): path: str = Field(min_length=1, max_length=500); 
 @app.get('/api/health')
 def health():
     con=db(); count=con.execute('SELECT COUNT(*) n FROM projects').fetchone()['n']; con.close()
-    return {'ok': True, 'service':'foe-agent', 'version':app.version, 'projects':count, 'access_required':True, 'access_configured':bool(FOE_ACCESS_KEY), 'execution':'docker sandbox required' if not ALLOW_HOST_COMMANDS else 'host commands explicitly enabled'}
+    return {'ok': True, 'service':'foe-agent', 'version':app.version, 'projects':count, 'auth_required':True, 'execution':'docker sandbox required' if not ALLOW_HOST_COMMANDS else 'host commands explicitly enabled'}
 
 @app.get('/api/models')
 async def models():
@@ -87,15 +190,17 @@ async def models():
         return {'provider':'ollama','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':f'Cannot reach or authenticate with model provider at {OLLAMA_URL}: {type(e).__name__}'}
 
 @app.post('/api/projects')
-def create_project(data: ProjectIn):
+def create_project(data: ProjectIn, request: Request):
     pid=uuid.uuid4().hex[:12]; now=time.time(); path=PROJECTS/pid; path.mkdir(parents=True)
     (path/'README.md').write_text(f'# {data.name}\n\nCreated with Foe Agent.\n', encoding='utf-8')
-    con=db(); con.execute('INSERT INTO projects VALUES(?,?,?)',(pid,data.name,now)); con.commit(); con.close()
+    owner=getattr(request.state,'user_id','legacy')
+    con=db(); con.execute('INSERT INTO projects(id,name,created_at,owner_id) VALUES(?,?,?,?)',(pid,data.name,now,owner)); con.commit(); con.close()
     return {'id':pid,'name':data.name,'created_at':now}
 
 @app.get('/api/projects')
-def list_projects():
-    con=db(); rows=con.execute('SELECT * FROM projects ORDER BY created_at DESC').fetchall(); con.close(); return [dict(r) for r in rows]
+def list_projects(request: Request):
+    owner=getattr(request.state,'user_id','legacy')
+    con=db(); rows=con.execute('SELECT id,name,created_at FROM projects WHERE owner_id=? ORDER BY created_at DESC',(owner,)).fetchall(); con.close(); return [dict(r) for r in rows]
 
 @app.get('/api/projects/{pid}/files')
 def list_files(pid: str):
@@ -251,7 +356,8 @@ class GithubImportIn(BaseModel):
     branch: str | None = None
 
 @app.post('/api/github/import/{owner}/{repo}')
-async def github_import_repo(owner: str, repo: str, data: GithubImportIn, x_github_token: str | None = Header(default=None)):
+async def github_import_repo(owner: str, repo: str, data: GithubImportIn, request: Request, x_github_token: str | None = Header(default=None)):
+    require_project_owner(data.project_id,getattr(request.state,'user_id','legacy'))
     base=project_path(data.project_id)
     headers=github_headers(x_github_token)
     try:
@@ -344,7 +450,7 @@ async def run_agent(pid: str, data: AgentIn):
     base=project_path(pid)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
         try:
-            tags=await client.get(f'{OLLAMA_URL}/api/tags'); tags.raise_for_status()
+            tags=await client.get(f'{OLLAMA_URL}/api/tags',headers=ollama_headers()); tags.raise_for_status()
             available=[m.get('name') for m in tags.json().get('models',[])]
             model=data.model or DEFAULT_MODEL
             if available and model not in available: raise HTTPException(400,f'Model {model} is not installed on the configured provider.')
@@ -374,7 +480,7 @@ async def run_agent(pid: str, data: AgentIn):
                     steps.append({'tool':name,'arguments':{k:v for k,v in args.items() if k!='content'},'result':result})
                     messages.append({'role':'tool','tool_name':name,'content':json.dumps(result,ensure_ascii=False)[:16000]})
             if not final:
-                r=await client.post(f'{OLLAMA_URL}/api/chat',json={'model':model,'messages':messages,'stream':False,'options':{'temperature':0.1}})
+                r=await client.post(f'{OLLAMA_URL}/api/chat',headers=ollama_headers(),json={'model':model,'messages':messages,'stream':False,'options':{'temperature':0.1}})
                 r.raise_for_status(); final=r.json().get('message',{}).get('content','Agent stopped after reaching the tool-step limit.')
             return {'ok':True,'model':model,'response':final,'steps':steps,'step_limit':data.max_steps}
         except HTTPException: raise
