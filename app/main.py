@@ -4,7 +4,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -17,9 +17,20 @@ OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
 DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
+FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
 ALLOW_HOST_COMMANDS = os.getenv('FOE_ALLOW_HOST_COMMANDS', 'false').lower() == 'true'
 
-app = FastAPI(title='Foe Agent API', version='0.1.0', description='Local-first AI software engineering workspace')
+app = FastAPI(title='Foe Agent API', version='0.2.0', description='AI software engineering workspace')
+
+@app.middleware('http')
+async def protect_api(request: Request, call_next):
+    # Protect project/file mutation, agent execution, terminal and model endpoints on public hosting.
+    if FOE_ACCESS_KEY and request.url.path.startswith('/api/') and request.url.path != '/api/health':
+        import hmac
+        supplied = request.headers.get('x-foe-access', '')
+        if not hmac.compare_digest(supplied, FOE_ACCESS_KEY):
+            return JSONResponse(status_code=401, content={'detail':'Foe access key required or invalid.'})
+    return await call_next(request)
 
 
 def db() -> sqlite3.Connection:
@@ -57,7 +68,7 @@ class GithubFileIn(BaseModel): path: str = Field(min_length=1, max_length=500); 
 @app.get('/api/health')
 def health():
     con=db(); count=con.execute('SELECT COUNT(*) n FROM projects').fetchone()['n']; con.close()
-    return {'ok': True, 'service':'foe-agent', 'version':app.version, 'projects':count, 'execution':'docker sandbox required' if not ALLOW_HOST_COMMANDS else 'host commands explicitly enabled'}
+    return {'ok': True, 'service':'foe-agent', 'version':app.version, 'projects':count, 'access_required':bool(FOE_ACCESS_KEY), 'execution':'docker sandbox required' if not ALLOW_HOST_COMMANDS else 'host commands explicitly enabled'}
 
 @app.get('/api/models')
 async def models():
