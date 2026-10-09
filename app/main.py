@@ -122,6 +122,7 @@ def db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     conn.executescript('''CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS bot_owners(bot_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, plan TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,created_at REAL NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at REAL NOT NULL,created_at REAL NOT NULL,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);''')
@@ -667,26 +668,51 @@ async def start_project_bot(pid: str, data: BotStartIn, request: Request):
             r=await client.post(f'{BOT_RUNNER_URL}/bots/start',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN},json=payload)
         if r.status_code>=400:
             raise HTTPException(r.status_code,'Bot runtime rejected the start request: '+r.text[:300])
-        return r.json()
+        result=r.json()
+        bot_id=(result.get('bot') or {}).get('id')
+        if bot_id:
+            con=db(); con.execute('INSERT OR REPLACE INTO bot_owners(bot_id,owner_id) VALUES(?,?)',(bot_id,getattr(request.state,'user_id','legacy'))); con.commit(); con.close()
+        return result
     except HTTPException: raise
     except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
 
 @app.get('/api/bots')
-async def list_project_bots():
+async def list_project_bots(request: Request):
     if not BOT_RUNNER_URL or not BOT_RUNNER_TOKEN:
         raise HTTPException(503,'The separate bot runtime is not configured.')
+    owner=getattr(request.state,'user_id','legacy')
+    con=db(); ids={r['bot_id'] for r in con.execute('SELECT bot_id FROM bot_owners WHERE owner_id=?',(owner,)).fetchall()}; con.close()
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             r=await client.get(f'{BOT_RUNNER_URL}/bots',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN})
         if r.status_code>=400: raise HTTPException(r.status_code,'Bot runtime status request failed.')
+        data=r.json()
+        return {'bots':[b for b in data.get('bots',[]) if b.get('id') in ids]}
+    except HTTPException: raise
+    except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
+
+@app.get('/api/bots/{bot_id}/logs')
+async def project_bot_logs(bot_id: str, request: Request):
+    if not BOT_RUNNER_URL or not BOT_RUNNER_TOKEN: raise HTTPException(503,'The separate bot runtime is not configured.')
+    owner=getattr(request.state,'user_id','legacy')
+    con=db(); row=con.execute('SELECT owner_id FROM bot_owners WHERE bot_id=?',(bot_id,)).fetchone(); con.close()
+    if not row or row['owner_id']!=owner: raise HTTPException(404,'Bot not found.')
+    if not re.fullmatch(r'[a-f0-9]{12}',bot_id): raise HTTPException(400,'Invalid bot id.')
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r=await client.get(f'{BOT_RUNNER_URL}/bots/{bot_id}/logs',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN})
+        if r.status_code>=400: raise HTTPException(r.status_code,'Bot logs could not be retrieved.')
         return r.json()
     except HTTPException: raise
     except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
 
 @app.post('/api/bots/{bot_id}/stop')
-async def stop_project_bot(bot_id: str):
+async def stop_project_bot(bot_id: str, request: Request):
     if not BOT_RUNNER_URL or not BOT_RUNNER_TOKEN: raise HTTPException(503,'The separate bot runtime is not configured.')
     if not re.fullmatch(r'[a-f0-9]{12}',bot_id): raise HTTPException(400,'Invalid bot id.')
+    owner=getattr(request.state,'user_id','legacy')
+    con=db(); row=con.execute('SELECT owner_id FROM bot_owners WHERE bot_id=?',(bot_id,)).fetchone(); con.close()
+    if not row or row['owner_id']!=owner: raise HTTPException(404,'Bot not found.')
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             r=await client.post(f'{BOT_RUNNER_URL}/bots/{bot_id}/stop',headers={'X-Foe-Bot-Token':BOT_RUNNER_TOKEN})
@@ -694,6 +720,7 @@ async def stop_project_bot(bot_id: str):
         return r.json()
     except HTTPException: raise
     except Exception as e: raise HTTPException(502,f'Could not reach separate bot runtime: {type(e).__name__}')
+
 
 @app.post('/api/projects/{pid}/tasks')
 def create_task(pid: str, data: TaskIn):
