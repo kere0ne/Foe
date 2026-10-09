@@ -7,7 +7,7 @@ _tmp = tempfile.TemporaryDirectory()
 os.environ["FOE_DATA_DIR"] = _tmp.name
 
 from fastapi.testclient import TestClient
-from app.main import app, db, create_session
+from app.main import app, db, create_session, provider_config, AGENT_TOOLS
 import time, uuid
 
 client = TestClient(app)
@@ -58,3 +58,12 @@ def test_saved_memories_round_trip():
     deleted = client.delete('/api/memories/' + memory['id'])
     assert deleted.status_code == 200
     assert all(item['id'] != memory['id'] for item in client.get('/api/memories').json())
+
+
+def test_deepseek_provider_removed():
+    assert provider_config('deepseek') is None
+
+
+def test_agent_exposes_sandboxed_command_runner():
+    names = {item['function']['name'] for item in AGENT_TOOLS}
+    assert 'run_command' in names
