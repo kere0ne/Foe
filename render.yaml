@@ -19,7 +19,7 @@ services:
       - key: GEMINI_BASE_URL
         value: https://generativelanguage.googleapis.com/v1beta/openai
       - key: OLLAMA_MODEL
-        value: gemini-3.8-flash
+        value: gemini-2.5-flash
       - key: GEMINI_API_KEY
         sync: false
       - key: OLLAMA_BASE_URL
