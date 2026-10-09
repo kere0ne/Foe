@@ -1,25 +1,42 @@
 # Foe Agent
 
-**An early-stage, local-first AI software engineering workspace.** Foe Agent provides a FastAPI backend and browser UI for project/file management, code editing, DeepSeek-compatible chat, file uploads, task planning, and optional sandboxed command execution.
+**Your own local-first AI assistant and software engineering workspace.** Foe combines an AI chat assistant with a project-aware coding agent, project files, an editor, uploads, a sandboxed terminal, GitHub tools, and optional bot runtime support.
 
-## Features
+## What makes it yours
 
-- Create and manage workspaces backed by SQLite metadata.
-- Browse, read, write, and delete project files with path checks.
-- Upload files and ZIP archives with size and archive-entry limits.
-- Stream responses from a configured Ollama model.
-- Record task plans and view task history.
-- Run explicit commands in a constrained Docker container when configured.
-- Responsive dark interface with chat, files, editor, terminal, and task views.
-- Health and model-connectivity endpoints.
+- Run an open model on a computer you control with Ollama. The default setup does not require a paid AI API key.
+- Ask general questions in Chat mode or let Agent mode inspect and edit a selected project.
+- Manage project files, upload individual files or ZIP archives, edit code, and review the agent work log.
+- Use the isolated Docker sandbox for approved checks. Commands are not run directly on the host by default.
+- Choose a different Ollama model using the `OLLAMA_MODEL` environment variable.
+- Use hosted providers only if you choose to configure their keys; provider access may have costs and limits.
 
-## Important security notice
+Foe is your own software, not a newly trained frontier model. Local model quality and speed depend on the model you download and your computer's memory, CPU, and GPU.
 
-This is a **prototype**, not a production-ready public service. Google OAuth sign-in and per-user authorization are implemented; complete the Google and persistent-storage setup before public use. Do not expose this service to the public internet or use it with multiple untrusted users. Review [SECURITY.md](SECURITY.md) and [docs/SANDBOX.md](docs/SANDBOX.md). Never enable `FOE_ALLOW_HOST_COMMANDS=true` on a public/shared deployment.
+## Run your own AI locally (recommended)
 
-## Quick start
+Requires Docker Desktop (or Docker Engine + Compose). The first launch downloads the default model, which can take several minutes and multiple gigabytes.
 
-Requires Python 3.11+ and an Ollama server.
+```sh
+git clone https://github.com/kere0ne/Foe.git
+cd Foe
+docker compose up --build
+```
+
+Then open http://localhost:8000. Ollama runs as a separate local container, and Foe sends prompts to it over the private Compose network. Model files and Foe project data are stored in named Docker volumes, so they survive normal container restarts.
+
+The default model is `qwen2.5-coder:7b`. To choose another Ollama model, create a `.env` file containing, for example:
+
+```dotenv
+OLLAMA_MODEL=qwen2.5-coder:7b
+FOE_PORT=8000
+```
+
+Restart Compose after changing the model. Larger models can be smarter but need more RAM/VRAM; smaller models run on more machines but may make more mistakes.
+
+## Existing Python/Ollama setup
+
+Requires Python 3.11+ and an Ollama server:
 
 ```sh
 python -m venv .venv
@@ -28,47 +45,35 @@ source .venv/bin/activate
 # Windows PowerShell: .venv\\Scripts\\Activate.ps1
 python -m pip install -r requirements.txt
 ollama pull qwen2.5-coder:7b
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+AI_PROVIDER=ollama OLLAMA_BASE_URL=http://localhost:11434 OLLAMA_MODEL=qwen2.5-coder:7b uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000. Ollama defaults to `http://localhost:11434`; configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL` as needed. A model is not bundled in this repository: Ollama runs the open model you choose.
+Open http://127.0.0.1:8000.
 
-## Hosted AI providers
+## Hosted website versus your own model
 
-Foe supports Meta Model API (Muse Spark) as its primary OpenAI-compatible provider, with optional DeepSeek, OpenRouter, and Gemini fallbacks. Configure `AI_PROVIDER=meta`, `META_API_BASE_URL=https://api.meta.ai/v1`, `META_MODEL=muse-spark-1.3`, and `MODEL_API_KEY`; optionally set `AI_FALLBACK_PROVIDERS=deepseek,openrouter,gemini` plus the matching provider API keys. Providers may have billing, quota, and rate limits; no hosted provider is unlimited.
+The public Render deployment is only the web app; its free instance does not include the resources to run a large language model. For a truly API-key-free model, run Foe and Ollama on your own PC with the Compose setup above. To use a model from the hosted website, configure a reachable model endpoint and protect it with authentication; never expose an unauthenticated Ollama server to the public internet.
+
+Optional hosted providers are configurable in Render using `AI_PROVIDER`, `AI_FALLBACK_PROVIDERS`, and the provider-specific keys. Hosted providers may charge money or enforce quotas.
 
 ## Google sign-in and persistent storage
 
-Foe uses Google OAuth only. Follow [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_SETUP.md) to configure the Google OAuth client and persistent database/storage. The app supports PostgreSQL via `DATABASE_URL`; project files are stored under `FOE_DATA_DIR`, which must point to a Render persistent disk mount (for example `/var/data`) to survive restarts. The current free web service has ephemeral storage, so a database alone does not preserve project files.
+Foe uses Google OAuth only. Follow [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_SETUP.md) to configure Google OAuth and persistent database/storage. For a local install, Docker volumes persist project data. On Render, set `DATABASE_URL` for durable account/session/project metadata and set `FOE_DATA_DIR` to a persistent disk mount for project files; a database alone does not preserve project files.
 
-## GitHub MCP and Discord bot runtime
+## GitHub and Discord bots
 
-See [docs/GITHUB_MCP_AND_BOTS.md](docs/GITHUB_MCP_AND_BOTS.md) for Foe's custom GitHub MCP server, GitHub agent tools, and the separate Python/Node.js bot runtime. The bot runner can cap a launch at 20 hours, but it must run on a host that stays awake. A free Render web service cannot guarantee continuous bot uptime; a dedicated always-on worker may incur charges. The runtime executes project code, so keep it private and protect it with a strong `FOE_BOT_RUNTIME_TOKEN`.
+See [docs/GITHUB_MCP_AND_BOTS.md](docs/GITHUB_MCP_AND_BOTS.md) for GitHub tools and the separate Python/Node.js bot runtime. The bot runner can cap a launch at 20 hours, but it must run on a host that stays awake. A free Render web service cannot guarantee continuous bot uptime.
 
-## Docker sandbox
+## Docker sandbox and security
 
-Build the sandbox image:
-
-```sh
-docker build -f sandbox.Dockerfile -t foe-agent-sandbox:latest .
-docker compose up --build
-```
-
-The sandbox disables network access and applies container resource restrictions. Docker socket access is privileged; use it only on a machine you control. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Foe is an early-stage project. The local Compose setup mounts the Docker socket so Foe can request sandbox containers; Docker socket access is powerful and should only be used on a machine you control. Keep the service private, review generated code before running it, and never enable `FOE_ALLOW_HOST_COMMANDS=true` on a public/shared deployment. See [SECURITY.md](SECURITY.md) and [docs/SANDBOX.md](docs/SANDBOX.md).
 
 ## Tests
 
 ```sh
+python -m pip install -r requirements.txt pytest
 pytest -q
 ```
-
-## Deploying to Render
-
-A `render.yaml` Blueprint is included. **Before using the public service, set `FOE_ACCESS_KEY`** to a long random secret in Render → your service → Environment. The service uses Google OAuth for account access. Configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in Render; configure `DATABASE_URL` for durable account/session/project metadata and set `FOE_DATA_DIR` to a persistent disk mount for project files. Never commit secrets.
-
-## Current limitations
-
-Task creation records a plan only; it does not autonomously complete the work. Authentication, multi-user isolation, OAuth/GitHub operations, advanced IDE features, a full autonomous tool loop, multi-agent coordination, and production-grade monitoring are not implemented.
 
 ## License
 
