@@ -13,11 +13,36 @@ PROJECTS = ROOT / 'projects'
 ROOT.mkdir(parents=True, exist_ok=True); PROJECTS.mkdir(parents=True, exist_ok=True)
 DB = ROOT / 'foe.db'
 MAX_UPLOAD = int(os.getenv('FOE_MAX_UPLOAD_BYTES', str(20 * 1024 * 1024)))
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'ollama').strip().lower()
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').rstrip('/')
 OLLAMA_API_KEY = os.getenv('OLLAMA_API_KEY', '').strip()
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
+GEMINI_URL = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta/openai').rstrip('/')
+def is_gemini(): return AI_PROVIDER == 'gemini'
 def ollama_headers():
     return {'Authorization': f'Bearer {OLLAMA_API_KEY}'} if OLLAMA_API_KEY else {}
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
+def model_headers():
+    key = GEMINI_API_KEY if is_gemini() else OLLAMA_API_KEY
+    return {'Authorization': f'Bearer {key}'} if key else {}
+def model_url():
+    return GEMINI_URL if is_gemini() else OLLAMA_URL
+def chat_endpoint():
+    return f'{model_url()}/chat/completions' if is_gemini() else f'{model_url()}/api/chat'
+def model_payload(messages, model, stream=False, temperature=0.2, tools=None):
+    payload={'model':model,'messages':messages,'stream':stream}
+    if is_gemini():
+        payload['temperature']=temperature
+        if tools: payload['tools']=tools
+    else:
+        payload['options']={'temperature':temperature}
+        if tools: payload['tools']=tools
+    return payload
+def unpack_model_message(payload):
+    if is_gemini():
+        choices=payload.get('choices') or []
+        return choices[0].get('message',{}) if choices else {}
+    return payload.get('message',{})
+DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemini-3.8-flash' if AI_PROVIDER == 'gemini' else 'qwen2.5-coder:7b')
 SANDBOX_IMAGE = os.getenv('FOE_SANDBOX_IMAGE', 'foe-agent-sandbox:latest')
 GITHUB_API = 'https://api.github.com'
 FOE_ACCESS_KEY = os.getenv('FOE_ACCESS_KEY', '').strip()
@@ -181,14 +206,20 @@ def health():
 
 @app.get('/api/models')
 async def models():
-    if OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
+    if is_gemini() and not GEMINI_API_KEY:
+        return {'provider':'gemini','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':'Set GEMINI_API_KEY in Render Environment. Create a key at https://aistudio.google.com/apikey.'}
+    if not is_gemini() and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
         return {'provider':'ollama-cloud','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':'Set OLLAMA_API_KEY in Render Environment. Create a key at https://ollama.com/settings/keys.'}
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            r=await client.get(f'{OLLAMA_URL}/api/tags', headers=ollama_headers()); r.raise_for_status(); payload=r.json()
+        async with httpx.AsyncClient(timeout=8) as client:
+            if is_gemini():
+                r=await client.get(f'{GEMINI_URL}/models',headers=model_headers()); r.raise_for_status(); payload=r.json()
+                names=[m.get('id') for m in payload.get('data',[]) if m.get('id')]
+                return {'provider':'gemini','connected':True,'default_model':DEFAULT_MODEL,'models':names}
+            r=await client.get(f'{OLLAMA_URL}/api/tags', headers=model_headers()); r.raise_for_status(); payload=r.json()
         return {'provider':'ollama','connected':True,'default_model':DEFAULT_MODEL,'models':[m.get('name') for m in payload.get('models',[])]}
     except Exception as e:
-        return {'provider':'ollama','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':f'Cannot reach or authenticate with model provider at {OLLAMA_URL}: {type(e).__name__}'}
+        return {'provider':'gemini' if is_gemini() else 'ollama','connected':False,'default_model':DEFAULT_MODEL,'models':[],'error':f'Cannot reach or authenticate with model provider: {type(e).__name__}'}
 
 @app.post('/api/projects')
 def create_project(data: ProjectIn, request: Request):
@@ -258,21 +289,35 @@ async def upload(pid: str, file: UploadFile = File(...)):
 
 @app.post('/api/chat')
 async def chat(data: ChatIn):
-    if OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
+    if is_gemini() and not GEMINI_API_KEY:
+        raise HTTPException(503,'Gemini is selected but GEMINI_API_KEY is missing. Create a key at https://aistudio.google.com/apikey and add it in Render → Environment.')
+    if not is_gemini() and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
         raise HTTPException(503,'Ollama Cloud is selected but OLLAMA_API_KEY is missing. Create a key at https://ollama.com/settings/keys and add it in Render → Environment.')
     if not data.messages or any(m.get('role') not in {'system','user','assistant'} or not isinstance(m.get('content'),str) for m in data.messages):
         raise HTTPException(400,'Messages must contain valid roles and text content')
     async def stream():
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
-                async with client.stream('POST', f'{OLLAMA_URL}/api/chat', headers=ollama_headers(), json={'model':data.model or DEFAULT_MODEL,'messages':data.messages,'stream':True,'options':{'temperature':data.temperature}}) as response:
+                async with client.stream('POST', chat_endpoint(), headers=model_headers(), json=model_payload(data.messages,data.model or DEFAULT_MODEL,True,data.temperature)) as response:
                     if response.status_code >= 400:
                         body=(await response.aread()).decode('utf-8', errors='replace')
                         yield 'data: ' + json.dumps({'error':f'AI provider returned HTTP {response.status_code}: {body[:500]}'}) + '\n\n'
                         return
-                    async for line in response.aiter_lines():
-                        if line: yield f'data: {line}\n\n'
-                    yield 'data: [DONE]\n\n'
+                    if is_gemini():
+                        async for line in response.aiter_lines():
+                            if not line.startswith('data:'): continue
+                            raw=line[5:].strip()
+                            if not raw or raw=='[DONE]': continue
+                            try:
+                                chunk=json.loads(raw); choices=chunk.get('choices') or []
+                                delta=choices[0].get('delta',{}) if choices else {}
+                                content=delta.get('content') or ''
+                                if content: yield 'data: '+json.dumps({'message':{'content':content},'done':False})+'\\n\\n'
+                            except json.JSONDecodeError: continue
+                    else:
+                        async for line in response.aiter_lines():
+                            if line: yield f'data: {line}\\n\\n'
+                    yield 'data: [DONE]\\n\\n'
         except Exception as e:
             yield 'data: ' + json.dumps({'error':f'AI provider unavailable at {OLLAMA_URL}: {type(e).__name__}. Start Ollama and pull a model.'}) + '\n\n'
     return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
@@ -446,15 +491,18 @@ async def execute_agent_tool(pid: str, name: str, args: dict[str, Any]) -> dict[
 
 @app.post('/api/projects/{pid}/agent')
 async def run_agent(pid: str, data: AgentIn):
-    if OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
+    if is_gemini() and not GEMINI_API_KEY:
+        raise HTTPException(503,'Gemini is selected but GEMINI_API_KEY is missing. Create a key at https://aistudio.google.com/apikey and add it in Render → Environment.')
+    if not is_gemini() and OLLAMA_URL.startswith('https://ollama.com') and not OLLAMA_API_KEY:
         raise HTTPException(503,'Ollama Cloud is selected but OLLAMA_API_KEY is missing. Create a key at https://ollama.com/settings/keys and add it in Render → Environment.')
     base=project_path(pid)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120,connect=5)) as client:
         try:
-            tags=await client.get(f'{OLLAMA_URL}/api/tags',headers=ollama_headers()); tags.raise_for_status()
-            available=[m.get('name') for m in tags.json().get('models',[])]
             model=data.model or DEFAULT_MODEL
-            if available and model not in available: raise HTTPException(400,f'Model {model} is not installed on the configured provider.')
+            if not is_gemini():
+                tags=await client.get(f'{OLLAMA_URL}/api/tags',headers=model_headers()); tags.raise_for_status()
+                available=[m.get('name') for m in tags.json().get('models',[])]
+                if available and model not in available: raise HTTPException(400,f'Model {model} is not installed on the configured provider.')
             rows=[]
             for p in base.rglob('*'):
                 if p.is_file() and not any(x in {'.git','node_modules','.venv','__pycache__'} for x in p.parts):
@@ -466,26 +514,33 @@ async def run_agent(pid: str, data: AgentIn):
             ]
             steps=[]; final=''
             for _ in range(data.max_steps):
-                r=await client.post(f'{OLLAMA_URL}/api/chat',headers=ollama_headers(),json={'model':model,'messages':messages,'tools':AGENT_TOOLS,'stream':False,'options':{'temperature':0.1}})
+                r=await client.post(chat_endpoint(),headers=model_headers(),json=model_payload(messages,model,False,0.1,AGENT_TOOLS))
                 if r.status_code>=400: raise HTTPException(502,'Model provider error: '+r.text[:400])
-                msg=r.json().get('message',{})
+                msg=unpack_model_message(r.json())
                 calls=msg.get('tool_calls') or []
-                messages.append({'role':'assistant','content':msg.get('content',''),'tool_calls':calls})
+                if is_gemini():
+                    messages.append({'role':'assistant','content':msg.get('content') or '', 'tool_calls':calls} if calls else {'role':'assistant','content':msg.get('content') or ''})
+                else:
+                    messages.append({'role':'assistant','content':msg.get('content',''),'tool_calls':calls})
                 if not calls:
                     final=msg.get('content','')
                     break
                 for call in calls:
                     fn=call.get('function',{}); name=fn.get('name',''); args=fn.get('arguments') or {}
+                    if isinstance(args,str):
+                        try: args=json.loads(args)
+                        except json.JSONDecodeError: args={}
                     if not isinstance(args,dict): args={}
                     result=await execute_agent_tool(pid,name,args)
                     steps.append({'tool':name,'arguments':{k:v for k,v in args.items() if k!='content'},'result':result})
-                    messages.append({'role':'tool','tool_name':name,'content':json.dumps(result,ensure_ascii=False)[:16000]})
+                    if is_gemini(): messages.append({'role':'tool','tool_call_id':call.get('id',''),'content':json.dumps(result,ensure_ascii=False)[:16000]})
+                    else: messages.append({'role':'tool','tool_name':name,'content':json.dumps(result,ensure_ascii=False)[:16000]})
             if not final:
-                r=await client.post(f'{OLLAMA_URL}/api/chat',headers=ollama_headers(),json={'model':model,'messages':messages,'stream':False,'options':{'temperature':0.1}})
-                r.raise_for_status(); final=r.json().get('message',{}).get('content','Agent stopped after reaching the tool-step limit.')
+                r=await client.post(chat_endpoint(),headers=model_headers(),json=model_payload(messages,model,False,0.1))
+                r.raise_for_status(); final=unpack_model_message(r.json()).get('content','Agent stopped after reaching the tool-step limit.')
             return {'ok':True,'model':model,'response':final,'steps':steps,'step_limit':data.max_steps}
         except HTTPException: raise
-        except httpx.ConnectError: raise HTTPException(503,f'Cannot reach Ollama at {OLLAMA_URL}. Configure OLLAMA_BASE_URL to a reachable model endpoint.')
+        except httpx.ConnectError: raise HTTPException(503,f'Cannot reach {"Gemini" if is_gemini() else "Ollama"} model provider. Check its endpoint and API key.')
         except Exception as e: raise HTTPException(502,f'Agent run failed: {type(e).__name__}: {str(e)[:250]}')
 
 @app.post('/api/projects/{pid}/tasks')
