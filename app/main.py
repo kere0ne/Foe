@@ -225,6 +225,42 @@ async def github_write_file(owner: str, repo: str, data: GithubFileIn, x_github_
     result=r.json()
     return {'saved':True,'path':data.path,'commit':result.get('commit',{}).get('sha'),'url':result.get('content',{}).get('html_url')}
 
+
+class GithubImportIn(BaseModel):
+    project_id: str
+    branch: str | None = None
+
+@app.post('/api/github/import/{owner}/{repo}')
+async def github_import_repo(owner: str, repo: str, data: GithubImportIn, x_github_token: str | None = Header(default=None)):
+    base=project_path(data.project_id)
+    headers=github_headers(x_github_token)
+    try:
+        async with httpx.AsyncClient(timeout=45,follow_redirects=True) as client:
+            meta=await client.get(f'{GITHUB_API}/repos/{owner}/{repo}',headers=headers)
+            if meta.status_code>=400: raise HTTPException(meta.status_code,'Cannot access repository. Check the token and repository name.')
+            branch=data.branch or meta.json().get('default_branch','main')
+            archive=await client.get(f'{GITHUB_API}/repos/{owner}/{repo}/zipball/{branch}',headers=headers)
+            if archive.status_code>=400: raise HTTPException(archive.status_code,'GitHub could not provide a source archive.')
+        import io
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as z:
+            entries=[x for x in z.infolist() if not x.is_dir()]
+            if len(entries)>2000: raise HTTPException(413,'Repository archive has more than 2000 files.')
+            total=0; copied=0
+            for entry in entries:
+                parts=PurePosixPath(entry.filename).parts
+                rel='/'.join(parts[1:])
+                if not rel or any(part in {'node_modules','.git','.venv','dist','build'} for part in PurePosixPath(rel).parts): continue
+                if entry.file_size>2_000_000: continue
+                total+=entry.file_size
+                if total>MAX_UPLOAD*5: raise HTTPException(413,'Repository archive exceeds the import size limit.')
+                dest=safe_file(base,rel); dest.parent.mkdir(parents=True,exist_ok=True)
+                with z.open(entry) as src, dest.open('wb') as out: shutil.copyfileobj(src,out)
+                copied+=1
+        return {'imported':True,'repository':f'{owner}/{repo}','branch':branch,'files':copied,'bytes':total}
+    except HTTPException: raise
+    except zipfile.BadZipFile: raise HTTPException(400,'GitHub returned an invalid archive.')
+    except Exception as e: raise HTTPException(502,f'GitHub import failed: {type(e).__name__}')
+
 AGENT_TOOLS = [
  {'type':'function','function':{'name':'list_files','description':'List all project files.','parameters':{'type':'object','properties':{},'required':[]}}},
  {'type':'function','function':{'name':'read_file','description':'Read a UTF-8 text file from the project.','parameters':{'type':'object','properties':{'path':{'type':'string'}},'required':['path']}}},
