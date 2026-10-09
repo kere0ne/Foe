@@ -96,13 +96,22 @@ async def start_bot(data: StartBot,x_foe_bot_token: str | None=Header(default=No
             pip=await asyncio.create_subprocess_exec(sys.executable,"-m","pip","install","--disable-pip-version-check","--no-input","--target",str(base/"packages"),*data.requirements,
                 stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT)
             try: out,_=await asyncio.wait_for(pip.communicate(),timeout=240)
-            except asyncio.TimeoutError: pip.kill(); await pip.wait(); raise HTTPException(408,"Dependency installation timed out.")
-            if pip.returncode!=0: raise HTTPException(400,"Dependency installation failed: "+out.decode(errors="replace")[-2500:])
-        env={"PATH":os.environ.get("PATH",""),"PYTHONUNBUFFERED":"1","HOME":str(base),**data.env}
-        env["PYTHONPATH"]=str(base/"packages")+os.pathsep+str(base)
+            except asyncio.TimeoutError: pip.kill(); await pip.wait(); raise HTTPException(408,"Python dependency installation timed out.")
+            if pip.returncode!=0: raise HTTPException(400,"Python dependency installation failed: "+out.decode(errors="replace")[-2500:])
         target=safe_path(base,data.entrypoint)
         if not target.is_file(): raise HTTPException(400,"Entrypoint file was not written.")
-        proc=await asyncio.create_subprocess_exec(sys.executable,str(target),cwd=str(base),env=env,
+        is_node=target.suffix.lower() in {".js",".mjs",".cjs"}
+        if is_node and not shutil.which("node"): raise HTTPException(503,"Node.js is not installed in this bot-runtime image.")
+        if is_node and (base/"package.json").is_file():
+            npm=await asyncio.create_subprocess_exec("npm","install","--omit=dev","--no-audit","--no-fund",cwd=str(base),
+                stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT)
+            try: out,_=await asyncio.wait_for(npm.communicate(),timeout=240)
+            except asyncio.TimeoutError: npm.kill(); await npm.wait(); raise HTTPException(408,"Node dependency installation timed out.")
+            if npm.returncode!=0: raise HTTPException(400,"Node dependency installation failed: "+out.decode(errors="replace")[-2500:])
+        env={"PATH":os.environ.get("PATH",""),"PYTHONUNBUFFERED":"1","HOME":str(base),**data.env}
+        env["PYTHONPATH"]=str(base/"packages")+os.pathsep+str(base)
+        command=["node",str(target)] if is_node else [sys.executable,str(target)]
+        proc=await asyncio.create_subprocess_exec(*command,cwd=str(base),env=env,
             stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT,start_new_session=True)
         now=time.time(); duration=min(data.runtime_seconds,MAX_RUNTIME)
         PROCESSES[bot_id]={"name":data.name,"entrypoint":data.entrypoint,"base":base,"process":proc,
