@@ -23,9 +23,9 @@ services:
       - key: GOOGLE_REDIRECT_URI
         value: https://foe-agent.onrender.com/api/auth/google/callback
       - key: AI_PROVIDER
-        value: gemini
+        value: ollama
       - key: AI_FALLBACK_PROVIDERS
-        value: openrouter
+        value: openrouter,gemini
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: OPENROUTER_MODEL
@@ -42,6 +42,8 @@ services:
         sync: false
       - key: OLLAMA_API_KEY
         sync: false
+      - key: OLLAMA_MODEL
+        value: foe:latest
       - key: FOE_BOT_RUNNER_URL
         sync: false
       - key: FOE_BOT_RUNNER_TOKEN
